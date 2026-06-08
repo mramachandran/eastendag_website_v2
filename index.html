@@ -1,0 +1,154 @@
+# "This Week at East End" — Facebook + Instagram Graph API Setup
+
+A practical sketch for pulling your latest Facebook and Instagram posts into a chronological strip on eastendag.org. Both run on Meta's Graph API, so **one app and one token cover both feeds.**
+
+> **The golden rule:** the access token NEVER goes in the website's JavaScript. It lives on a tiny server function that the page calls. Anyone who sees your token can post as your church. Keep it server-side.
+
+---
+
+## The shape of it
+
+```
+ Visitor's browser  ──►  /api/social  (your server function)  ──►  Meta Graph API
+   (no token)            holds token, caches 30 min            FB Page + IG account
+        ◄── clean JSON ──┘
+```
+
+The page asks your own `/api/social` endpoint for "the latest posts." That function holds the secret token, calls Meta, caches the result, and hands back sanitized JSON. The token never leaves the server.
+
+---
+
+## One-time setup (about 30–45 minutes)
+
+### 1. Get the accounts into the right state
+- **Instagram must be a Business or Creator account** (free to switch in the IG app: Settings → Account type). The old "Instagram Basic Display API" was shut down in December 2024, so a personal IG account can no longer be read by API — Business/Creator is now required.
+- **Link Instagram to the Facebook Page** (`facebook.com/eastendag`). In Facebook Page settings → Linked accounts → Instagram. This is what lets one token read both.
+
+### 2. Create a Meta app
+- Go to [developers.facebook.com](https://developers.facebook.com) → My Apps → Create App → type **Business**.
+- Add the **Facebook Login** product, and enable the **Pages** and **Instagram** permissions.
+
+### 3. Grant the permissions
+In the **Graph API Explorer** (Tools menu), select your app and request a User token with:
+- `pages_show_list`
+- `pages_read_engagement`
+- `instagram_basic`
+
+Approve for `facebook.com/eastendag` when prompted.
+
+### 4. Turn it into a long-lived Page token
+Short-lived user tokens die in ~1 hour. Do this once:
+
+1. Exchange for a long-lived user token (~60 days):
+   `GET /oauth/access_token?grant_type=fb_exchange_token&client_id={APP_ID}&client_secret={APP_SECRET}&fb_exchange_token={SHORT_TOKEN}`
+2. Get the **Page token** derived from it:
+   `GET /me/accounts` → copy the `access_token` for East End. A Page token derived from a long-lived user token effectively **does not expire** (until the password changes or you revoke it).
+
+**For production, the cleaner option** is a **System User token** from Meta Business Manager → Business Settings → System Users. Those never expire and aren't tied to a personal login — better for a church where volunteers come and go.
+
+### 5. Grab your IDs
+- `PAGE_ID`: from the `/me/accounts` response above.
+- `IG_USER_ID`: `GET /{PAGE_ID}?fields=instagram_business_account`
+
+### 6. Store the secrets
+Put these in your host's environment variables (Vercel / Netlify / Cloudflare — never in the repo):
+```
+META_PAGE_TOKEN = <the long-lived page or system-user token>
+FB_PAGE_ID      = <PAGE_ID>
+IG_USER_ID      = <IG_USER_ID>
+```
+
+---
+
+## The server function
+
+Drop this at `/api/social.js` (Vercel/Netlify style). It merges both feeds, sorts newest-first, caches 30 minutes to stay well under rate limits, and never exposes the token.
+
+```js
+// /api/social.js  — token stays on the server
+const TOKEN   = process.env.META_PAGE_TOKEN;
+const PAGE_ID = process.env.FB_PAGE_ID;
+const IG_ID   = process.env.IG_USER_ID;        // optional
+const V       = "v21.0";                        // use the current version shown in your App Dashboard
+let cache = { at: 0, data: null };
+
+export default async function handler(req, res) {
+  if (cache.data && Date.now() - cache.at < 30 * 60 * 1000) {
+    return res.status(200).json(cache.data);    // served from cache
+  }
+  try {
+    const fb = await fetch(
+      `https://graph.facebook.com/${V}/${PAGE_ID}/posts` +
+      `?fields=message,permalink_url,created_time,full_picture&limit=6&access_token=${TOKEN}`
+    ).then(r => r.json());
+
+    let ig = { data: [] };
+    if (IG_ID) {
+      ig = await fetch(
+        `https://graph.facebook.com/${V}/${IG_ID}/media` +
+        `?fields=caption,permalink,timestamp,media_type,media_url,thumbnail_url&limit=6&access_token=${TOKEN}`
+      ).then(r => r.json());
+    }
+
+    const items = [
+      ...(fb.data || []).map(p => ({
+        source: "facebook", text: p.message || "", url: p.permalink_url,
+        image: p.full_picture || null, time: p.created_time,
+      })),
+      ...(ig.data || []).map(m => ({
+        source: "instagram", text: m.caption || "", url: m.permalink,
+        image: m.media_type === "VIDEO" ? m.thumbnail_url : m.media_url, time: m.timestamp,
+      })),
+    ]
+      .sort((a, b) => new Date(b.time) - new Date(a.time))
+      .slice(0, 6);
+
+    cache = { at: Date.now(), data: { items } };
+    res.status(200).json({ items });
+  } catch (e) {
+    res.status(200).json({ items: [], error: "feed unavailable" });
+  }
+}
+```
+
+---
+
+## The front-end hook
+
+The strip ships with sample tiles so it always looks right. This replaces them when real data is available, and silently keeps the samples if the feed is down:
+
+```js
+fetch("/api/social")
+  .then(r => r.json())
+  .then(({ items }) => {
+    if (!items || !items.length) return;        // keep fallback tiles
+    strip.innerHTML = items.map(it => `
+      <a class="tw-card" href="${it.url}" target="_blank" rel="noopener">
+        ${it.image ? `<img src="${it.image}" alt="">` : ""}
+        <div class="tw-body">
+          <span class="tw-src">${it.source}</span>
+          <p>${(it.text || "").slice(0, 120)}</p>
+          <time>${new Date(it.time).toLocaleDateString()}</time>
+        </div>
+      </a>`).join("");
+  })
+  .catch(() => {});                              // keep fallback tiles
+```
+
+*(This hook is already wired into the prototype's "This Week at East End" section.)*
+
+---
+
+## Things to know before you build
+
+- **Don't rely on the Events endpoint.** Meta has restricted/deprecated third-party access to Page `/events`. Pull **posts and photos** for the strip, and keep event dates managed manually on the site (or in your posts). If you need a real calendar, a dedicated tool (Church Center, Google Calendar embed) is more reliable than the Events API.
+- **App Review / Live mode.** While the app is in *development* mode you (as admin/developer) can read your own page immediately. To serve the feed to *all* public visitors, the app usually needs to be in **Live** mode, and `pages_read_engagement` + `instagram_basic` may require **App Review + Business Verification**. Budget a few days for that approval if you go fully public.
+- **Caching is not optional.** The 30-minute cache in the function keeps you under rate limits and makes the page fast. Posts don't change minute-to-minute, so this is invisible to visitors.
+- **Token hygiene.** If a token ever leaks, revoke it in Business Settings and regenerate. Prefer the System User token so it isn't tied to one person's Facebook login.
+- **Instagram is likely your richest feed** — it's visual and probably your most active channel, which makes it the strongest "we're alive this week" signal on the whole site.
+
+---
+
+## If you'd rather not touch code
+
+Hosted widgets do this with no server and no token management — **SociableKit**, **Curator.io**, **EmbedSocial**, or **Juicer** all turn a Facebook Page + Instagram into an embeddable feed for a small monthly fee. You paste one `<script>` tag. The trade-off is a recurring cost, less design control, and their branding — but zero maintenance. For a small church with no developer, this is often the pragmatic choice; the custom Graph API route above is the right call only if you want it to match the redesign pixel-for-pixel and avoid subscriptions.
