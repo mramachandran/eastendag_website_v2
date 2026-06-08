@@ -1,154 +1,1315 @@
-# "This Week at East End" — Facebook + Instagram Graph API Setup
-
-A practical sketch for pulling your latest Facebook and Instagram posts into a chronological strip on eastendag.org. Both run on Meta's Graph API, so **one app and one token cover both feeds.**
-
-> **The golden rule:** the access token NEVER goes in the website's JavaScript. It lives on a tiny server function that the page calls. Anyone who sees your token can post as your church. Keep it server-side.
-
----
-
-## The shape of it
-
-```
- Visitor's browser  ──►  /api/social  (your server function)  ──►  Meta Graph API
-   (no token)            holds token, caches 30 min            FB Page + IG account
-        ◄── clean JSON ──┘
-```
-
-The page asks your own `/api/social` endpoint for "the latest posts." That function holds the secret token, calls Meta, caches the result, and hands back sanitized JSON. The token never leaves the server.
-
----
-
-## One-time setup (about 30–45 minutes)
-
-### 1. Get the accounts into the right state
-- **Instagram must be a Business or Creator account** (free to switch in the IG app: Settings → Account type). The old "Instagram Basic Display API" was shut down in December 2024, so a personal IG account can no longer be read by API — Business/Creator is now required.
-- **Link Instagram to the Facebook Page** (`facebook.com/eastendag`). In Facebook Page settings → Linked accounts → Instagram. This is what lets one token read both.
-
-### 2. Create a Meta app
-- Go to [developers.facebook.com](https://developers.facebook.com) → My Apps → Create App → type **Business**.
-- Add the **Facebook Login** product, and enable the **Pages** and **Instagram** permissions.
-
-### 3. Grant the permissions
-In the **Graph API Explorer** (Tools menu), select your app and request a User token with:
-- `pages_show_list`
-- `pages_read_engagement`
-- `instagram_basic`
-
-Approve for `facebook.com/eastendag` when prompted.
-
-### 4. Turn it into a long-lived Page token
-Short-lived user tokens die in ~1 hour. Do this once:
-
-1. Exchange for a long-lived user token (~60 days):
-   `GET /oauth/access_token?grant_type=fb_exchange_token&client_id={APP_ID}&client_secret={APP_SECRET}&fb_exchange_token={SHORT_TOKEN}`
-2. Get the **Page token** derived from it:
-   `GET /me/accounts` → copy the `access_token` for East End. A Page token derived from a long-lived user token effectively **does not expire** (until the password changes or you revoke it).
-
-**For production, the cleaner option** is a **System User token** from Meta Business Manager → Business Settings → System Users. Those never expire and aren't tied to a personal login — better for a church where volunteers come and go.
-
-### 5. Grab your IDs
-- `PAGE_ID`: from the `/me/accounts` response above.
-- `IG_USER_ID`: `GET /{PAGE_ID}?fields=instagram_business_account`
-
-### 6. Store the secrets
-Put these in your host's environment variables (Vercel / Netlify / Cloudflare — never in the repo):
-```
-META_PAGE_TOKEN = <the long-lived page or system-user token>
-FB_PAGE_ID      = <PAGE_ID>
-IG_USER_ID      = <IG_USER_ID>
-```
-
----
-
-## The server function
-
-Drop this at `/api/social.js` (Vercel/Netlify style). It merges both feeds, sorts newest-first, caches 30 minutes to stay well under rate limits, and never exposes the token.
-
-```js
-// /api/social.js  — token stays on the server
-const TOKEN   = process.env.META_PAGE_TOKEN;
-const PAGE_ID = process.env.FB_PAGE_ID;
-const IG_ID   = process.env.IG_USER_ID;        // optional
-const V       = "v21.0";                        // use the current version shown in your App Dashboard
-let cache = { at: 0, data: null };
-
-export default async function handler(req, res) {
-  if (cache.data && Date.now() - cache.at < 30 * 60 * 1000) {
-    return res.status(200).json(cache.data);    // served from cache
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>East End Assembly of God — Restoring Hope, Changing Lives</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,900&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --ink:#0e0b18;
+    --ink-2:#1a1530;
+    --cream:#fbf6ee;
+    --gold:#ffb23e;
+    --gold-deep:#ff8a3d;
+    --rose:#ff6b8a;
+    --sky:#5ec8ff;
+    --violet:#8b6bff;
+    --text-dim:rgba(251,246,238,.62);
+    --maxw:1240px;
+    --ease:cubic-bezier(.22,1,.36,1);
   }
-  try {
-    const fb = await fetch(
-      `https://graph.facebook.com/${V}/${PAGE_ID}/posts` +
-      `?fields=message,permalink_url,created_time,full_picture&limit=6&access_token=${TOKEN}`
-    ).then(r => r.json());
-
-    let ig = { data: [] };
-    if (IG_ID) {
-      ig = await fetch(
-        `https://graph.facebook.com/${V}/${IG_ID}/media` +
-        `?fields=caption,permalink,timestamp,media_type,media_url,thumbnail_url&limit=6&access_token=${TOKEN}`
-      ).then(r => r.json());
-    }
-
-    const items = [
-      ...(fb.data || []).map(p => ({
-        source: "facebook", text: p.message || "", url: p.permalink_url,
-        image: p.full_picture || null, time: p.created_time,
-      })),
-      ...(ig.data || []).map(m => ({
-        source: "instagram", text: m.caption || "", url: m.permalink,
-        image: m.media_type === "VIDEO" ? m.thumbnail_url : m.media_url, time: m.timestamp,
-      })),
-    ]
-      .sort((a, b) => new Date(b.time) - new Date(a.time))
-      .slice(0, 6);
-
-    cache = { at: Date.now(), data: { items } };
-    res.status(200).json({ items });
-  } catch (e) {
-    res.status(200).json({ items: [], error: "feed unavailable" });
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{
+    font-family:'Inter',system-ui,sans-serif;
+    background:var(--ink);
+    color:var(--cream);
+    overflow-x:hidden;
+    -webkit-font-smoothing:antialiased;
   }
-}
-```
+  ::selection{background:var(--gold);color:var(--ink)}
+  a{color:inherit;text-decoration:none}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 28px}
+  .serif{font-family:'Fraunces',serif}
 
----
+  /* ---------- NAV ---------- */
+  nav{
+    position:fixed;top:0;left:0;right:0;z-index:100;
+    display:flex;align-items:center;justify-content:space-between;
+    padding:18px 32px;
+    transition:all .5s var(--ease);
+  }
+  nav.scrolled{
+    background:rgba(14,11,24,.72);
+    backdrop-filter:blur(18px);
+    border-bottom:1px solid rgba(255,255,255,.07);
+    padding:12px 32px;
+  }
+  .logo{display:flex;align-items:center;gap:11px;font-weight:700;letter-spacing:-.02em}
+  .logo .mark{
+    width:34px;height:34px;border-radius:11px;
+    background:conic-gradient(from 210deg,var(--gold),var(--rose),var(--violet),var(--sky),var(--gold));
+    display:grid;place-items:center;font-family:'Fraunces',serif;font-weight:900;color:var(--ink);
+    box-shadow:0 6px 22px rgba(255,138,61,.35);
+  }
+  .logo b{font-size:1.02rem}
+  .logo span{display:block;font-size:.58rem;letter-spacing:.28em;color:var(--text-dim);font-weight:600}
+  .nav-links{display:flex;gap:30px;align-items:center}
+  .nav-links a{font-size:.86rem;font-weight:500;color:var(--text-dim);transition:color .25s}
+  .nav-links a:hover{color:var(--cream)}
+  .btn{
+    font-weight:600;font-size:.86rem;padding:11px 22px;border-radius:100px;
+    background:var(--cream);color:var(--ink);transition:transform .3s var(--ease),box-shadow .3s;
+    display:inline-block;
+  }
+  .btn:hover{transform:translateY(-2px);box-shadow:0 10px 30px rgba(251,246,238,.25)}
+  .btn-glow{background:linear-gradient(120deg,var(--gold),var(--gold-deep));color:var(--ink)}
+  .btn-glow:hover{box-shadow:0 12px 34px rgba(255,138,61,.5)}
+  .nav-toggle{display:none}
 
-## The front-end hook
+  /* ---------- HERO ---------- */
+  .hero{position:relative;min-height:100vh;display:flex;align-items:center;overflow:hidden}
+  .rays{position:absolute;inset:0;z-index:0}
+  .rays::before{
+    content:"";position:absolute;top:-30%;left:50%;transform:translateX(-50%);
+    width:120vw;height:120vh;
+    background:
+      radial-gradient(60% 50% at 50% 0%,rgba(255,178,62,.5),transparent 60%),
+      radial-gradient(40% 40% at 70% 10%,rgba(255,107,138,.35),transparent 60%),
+      radial-gradient(45% 45% at 25% 5%,rgba(139,107,255,.35),transparent 60%);
+    filter:blur(8px);
+    animation:breathe 9s ease-in-out infinite;
+  }
+  @keyframes breathe{0%,100%{opacity:.85;transform:translateX(-50%) scale(1)}50%{opacity:1;transform:translateX(-50%) scale(1.06)}}
+  .sun{
+    position:absolute;top:8%;left:50%;transform:translateX(-50%);
+    width:min(640px,80vw);height:min(640px,80vw);border-radius:50%;
+    background:radial-gradient(circle,rgba(255,200,90,.55),rgba(255,138,61,.12) 45%,transparent 70%);
+    z-index:0;animation:breathe 9s ease-in-out infinite;
+  }
+  .grain{position:absolute;inset:0;z-index:1;opacity:.5;pointer-events:none;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.5'/%3E%3C/svg%3E");}
+  .hero-content{position:relative;z-index:3;width:100%;text-align:center;padding-top:80px}
+  .eyebrow{
+    display:inline-flex;align-items:center;gap:9px;font-size:.74rem;letter-spacing:.22em;
+    text-transform:uppercase;color:var(--gold);font-weight:600;margin-bottom:26px;
+    padding:8px 16px;border:1px solid rgba(255,178,62,.3);border-radius:100px;
+    background:rgba(255,178,62,.06);
+  }
+  .pulse{width:7px;height:7px;border-radius:50%;background:var(--gold);box-shadow:0 0 0 0 rgba(255,178,62,.6);animation:pulse 2s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(255,178,62,.6)}70%{box-shadow:0 0 0 12px rgba(255,178,62,0)}100%{box-shadow:0 0 0 0 rgba(255,178,62,0)}}
+  h1.hero-title{
+    font-family:'Fraunces',serif;font-weight:400;line-height:.96;letter-spacing:-.03em;
+    font-size:clamp(3.2rem,9vw,8.4rem);margin:0 auto;max-width:14ch;
+  }
+  h1.hero-title em{font-style:italic;font-weight:600;
+    background:linear-gradient(120deg,var(--gold),var(--rose),var(--violet));
+    -webkit-background-clip:text;background-clip:text;color:transparent;}
+  .hero-sub{margin:30px auto 0;max-width:46ch;font-size:clamp(1rem,1.5vw,1.22rem);color:var(--text-dim);line-height:1.6}
+  .hero-cta{display:flex;gap:14px;justify-content:center;margin-top:40px;flex-wrap:wrap}
+  .btn-lg{padding:16px 32px;font-size:.98rem}
+  .btn-ghost{background:transparent;border:1px solid rgba(255,255,255,.22);color:var(--cream)}
+  .btn-ghost:hover{background:rgba(255,255,255,.07);box-shadow:none}
+  .play{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;background:var(--gold);color:var(--ink);font-size:.6rem;margin-right:4px}
 
-The strip ships with sample tiles so it always looks right. This replaces them when real data is available, and silently keeps the samples if the feed is down:
+  /* reveal */
+  .reveal{opacity:0;transform:translateY(30px);transition:opacity .9s var(--ease),transform .9s var(--ease)}
+  .reveal.in{opacity:1;transform:none}
+  .d1{transition-delay:.08s}.d2{transition-delay:.16s}.d3{transition-delay:.24s}.d4{transition-delay:.32s}
 
-```js
-fetch("/api/social")
-  .then(r => r.json())
-  .then(({ items }) => {
-    if (!items || !items.length) return;        // keep fallback tiles
-    strip.innerHTML = items.map(it => `
-      <a class="tw-card" href="${it.url}" target="_blank" rel="noopener">
-        ${it.image ? `<img src="${it.image}" alt="">` : ""}
-        <div class="tw-body">
-          <span class="tw-src">${it.source}</span>
-          <p>${(it.text || "").slice(0, 120)}</p>
-          <time>${new Date(it.time).toLocaleDateString()}</time>
+  /* ---------- LIVE BAR ---------- */
+  .livebar{
+    position:relative;z-index:3;margin:-46px auto 0;max-width:880px;
+    background:rgba(26,21,48,.7);backdrop-filter:blur(20px);
+    border:1px solid rgba(255,255,255,.1);border-radius:22px;
+    padding:22px 28px;display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap;
+    box-shadow:0 30px 80px rgba(0,0,0,.45);
+  }
+  .livebar .lb-item{display:flex;flex-direction:column;gap:3px}
+  .lb-label{font-size:.68rem;letter-spacing:.18em;text-transform:uppercase;color:var(--text-dim)}
+  .lb-value{font-family:'Fraunces',serif;font-size:1.35rem}
+  .lb-count{color:var(--gold)}
+  .lb-divider{width:1px;height:42px;background:rgba(255,255,255,.12)}
+
+  /* ---------- SECTIONS ---------- */
+  section{position:relative}
+  .sec{padding:130px 0}
+  .sec-head{max-width:660px;margin-bottom:60px}
+  .tag{font-size:.74rem;letter-spacing:.22em;text-transform:uppercase;color:var(--gold);font-weight:600;margin-bottom:18px;display:block}
+  h2{font-family:'Fraunces',serif;font-weight:400;font-size:clamp(2.1rem,4.6vw,3.6rem);line-height:1.04;letter-spacing:-.02em}
+  h2 em{font-style:italic;color:var(--gold)}
+  .lead{margin-top:20px;color:var(--text-dim);font-size:1.1rem;line-height:1.7;max-width:54ch}
+
+  /* paths */
+  .paths{display:grid;grid-template-columns:repeat(3,1fr);gap:22px}
+  .path{
+    position:relative;border-radius:24px;padding:34px;overflow:hidden;
+    background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,.02));
+    border:1px solid rgba(255,255,255,.08);transition:transform .5s var(--ease),border-color .5s;
+    min-height:300px;display:flex;flex-direction:column;justify-content:flex-end;
+  }
+  .path:hover{transform:translateY(-8px);border-color:rgba(255,178,62,.4)}
+  .path .glow{position:absolute;inset:0;opacity:.5;transition:opacity .5s}
+  .path:hover .glow{opacity:.9}
+  .p1 .glow{background:radial-gradient(120% 80% at 0% 0%,rgba(255,178,62,.28),transparent 60%)}
+  .p2 .glow{background:radial-gradient(120% 80% at 100% 0%,rgba(255,107,138,.28),transparent 60%)}
+  .p3 .glow{background:radial-gradient(120% 80% at 50% 0%,rgba(139,107,255,.3),transparent 60%)}
+  .path .num{position:relative;font-family:'Fraunces',serif;font-size:.9rem;color:var(--gold);margin-bottom:auto}
+  .path h3{position:relative;font-family:'Fraunces',serif;font-weight:500;font-size:1.7rem;margin-bottom:10px}
+  .path p{position:relative;color:var(--text-dim);font-size:.95rem;line-height:1.6}
+  .path .arrow{position:relative;margin-top:18px;font-size:.85rem;font-weight:600;color:var(--gold);display:inline-flex;gap:7px;align-items:center;transition:gap .3s}
+  .path:hover .arrow{gap:13px}
+
+  /* ---------- SUNDAY ---------- */
+  .sunday{background:linear-gradient(180deg,var(--ink),var(--ink-2));overflow:hidden}
+  .sunday-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:60px;align-items:center}
+  .time-card{
+    border-radius:28px;padding:42px;
+    background:linear-gradient(150deg,rgba(255,178,62,.14),rgba(139,107,255,.1));
+    border:1px solid rgba(255,255,255,.1);position:relative;overflow:hidden;
+  }
+  .time-card::before{content:"";position:absolute;top:-60px;right:-60px;width:200px;height:200px;border-radius:50%;
+    background:radial-gradient(circle,rgba(255,178,62,.4),transparent 70%);filter:blur(20px)}
+  .big-time{font-family:'Fraunces',serif;font-size:clamp(3rem,7vw,5rem);line-height:1;position:relative}
+  .big-time small{display:block;font-size:.95rem;letter-spacing:.2em;text-transform:uppercase;color:var(--gold);font-family:'Inter';margin-bottom:10px;font-weight:600}
+  .wk{position:relative;margin-top:30px;display:flex;flex-direction:column;gap:14px}
+  .wk-row{display:flex;justify-content:space-between;padding-bottom:14px;border-bottom:1px solid rgba(255,255,255,.1);font-size:.95rem}
+  .wk-row span:last-child{color:var(--text-dim)}
+
+  /* ---------- WATCH ---------- */
+  .watch-card{
+    position:relative;border-radius:26px;overflow:hidden;aspect-ratio:16/10;
+    background:linear-gradient(135deg,#241c44,#3a2a5e);
+    display:grid;place-items:center;border:1px solid rgba(255,255,255,.1);
+  }
+  .watch-card .pbtn{
+    width:84px;height:84px;border-radius:50%;background:rgba(255,255,255,.95);color:var(--ink);
+    display:grid;place-items:center;font-size:1.6rem;cursor:pointer;transition:transform .4s var(--ease);
+    box-shadow:0 0 0 0 rgba(255,255,255,.4);animation:pulse2 2.4s infinite;
+  }
+  @keyframes pulse2{0%{box-shadow:0 0 0 0 rgba(255,255,255,.4)}70%{box-shadow:0 0 0 26px rgba(255,255,255,0)}100%{box-shadow:0 0 0 0 rgba(255,255,255,0)}}
+  .watch-card:hover .pbtn{transform:scale(1.08)}
+  .watch-meta{position:absolute;left:24px;bottom:22px}
+  .live-dot{display:inline-flex;align-items:center;gap:8px;font-size:.72rem;letter-spacing:.18em;text-transform:uppercase;font-weight:700;color:#ff5a5a}
+  .live-dot i{width:8px;height:8px;border-radius:50%;background:#ff5a5a;animation:pulse 1.5s infinite}
+
+  /* ---------- MESSAGES ---------- */
+  .msg-grid{display:grid;grid-template-columns:1.15fr .85fr;gap:38px;align-items:center;margin-bottom:80px}
+  .watch-card{text-decoration:none}
+  .msg-date{font-size:.74rem;letter-spacing:.16em;text-transform:uppercase;color:var(--text-dim);margin-bottom:14px}
+  .msg-title{font-family:'Fraunces',serif;font-weight:500;font-size:clamp(1.5rem,2.6vw,2.1rem);line-height:1.1;margin-bottom:16px}
+  .msg-summary{color:var(--text-dim);font-size:1rem;line-height:1.7}
+  .scripture{margin-top:22px;padding:20px 22px;border-left:3px solid var(--gold);background:rgba(255,178,62,.06);border-radius:0 14px 14px 0}
+  .sc-label{font-size:.68rem;letter-spacing:.18em;text-transform:uppercase;color:var(--gold);font-weight:600}
+  .scripture p{font-family:'Fraunces',serif;font-style:italic;font-size:1.02rem;line-height:1.5;margin-top:8px}
+  .msg-cta{display:flex;gap:12px;margin-top:26px;flex-wrap:wrap}
+
+  /* songs */
+  .songs{border-radius:26px;padding:42px;background:linear-gradient(150deg,rgba(139,107,255,.14),rgba(94,200,255,.08));border:1px solid rgba(255,255,255,.1)}
+  .songs-head{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;margin-bottom:30px;flex-wrap:wrap}
+  .songs-title{font-family:'Fraunces',serif;font-weight:500;font-size:clamp(1.6rem,3vw,2.3rem)}
+  .songs-note{color:var(--text-dim);font-size:.98rem;line-height:1.6;margin-top:10px;max-width:52ch}
+  .song-list{display:grid;grid-template-columns:1fr 1fr;gap:2px 36px}
+  .song{display:flex;align-items:center;gap:16px;padding:16px 0;border-bottom:1px solid rgba(255,255,255,.1)}
+  .song .s-num{font-family:'Fraunces',serif;color:var(--gold);font-size:.9rem;width:24px}
+  .song b{font-weight:600;font-size:1rem}
+  .song i{display:block;font-style:normal;color:var(--text-dim);font-size:.78rem;margin-top:2px}
+  .sample-note{color:var(--text-dim);font-size:.78rem;margin-top:18px;opacity:.7}
+
+  /* ---------- STUDENTS ---------- */
+  .students{position:relative;padding:130px 0;overflow:hidden;
+    background:linear-gradient(180deg,var(--ink),#170f2e 55%,var(--ink))}
+  .st-glow{position:absolute;inset:0;z-index:1;opacity:.8;
+    background:
+      radial-gradient(50% 40% at 15% 20%,rgba(139,107,255,.3),transparent 60%),
+      radial-gradient(45% 40% at 85% 30%,rgba(94,200,255,.22),transparent 60%),
+      radial-gradient(50% 45% at 60% 90%,rgba(255,107,138,.2),transparent 60%);
+    animation:breathe 11s ease-in-out infinite}
+  .campus-chips{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:46px}
+  .campus-chips span{font-size:.84rem;font-weight:600;padding:9px 18px;border-radius:100px;
+    border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.04);color:var(--cream)}
+  .campus-chips span:last-child{background:linear-gradient(120deg,var(--gold),var(--gold-deep));color:var(--ink);border-color:transparent}
+  .st-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+  .st-card{border-radius:22px;padding:30px;border:1px solid rgba(255,255,255,.1);
+    background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,.02));
+    transition:transform .5s var(--ease),border-color .5s;display:flex;flex-direction:column}
+  .st-card:hover{transform:translateY(-8px);border-color:rgba(139,107,255,.5)}
+  .st-emoji{font-size:2.1rem;margin-bottom:16px}
+  .st-card h3{font-family:'Fraunces',serif;font-weight:500;font-size:1.45rem;margin-bottom:9px}
+  .st-card p{color:var(--text-dim);font-size:.96rem;line-height:1.6}
+  .st-feature{grid-column:span 1;background:linear-gradient(150deg,rgba(255,138,61,.22),rgba(255,107,138,.14));border-color:rgba(255,178,62,.35)}
+  .st-join{background:linear-gradient(150deg,rgba(139,107,255,.24),rgba(94,200,255,.14));border-color:rgba(139,107,255,.4)}
+  .st-cta{margin-top:34px;border-radius:24px;padding:38px;
+    background:linear-gradient(120deg,rgba(139,107,255,.18),rgba(255,178,62,.12));
+    border:1px solid rgba(255,255,255,.12);display:flex;align-items:center;justify-content:space-between;gap:26px;flex-wrap:wrap}
+  .st-cta-h{font-family:'Fraunces',serif;font-weight:500;font-size:1.7rem;margin-bottom:6px}
+  .st-cta p{color:var(--text-dim)}
+
+  /* ---------- THIS WEEK STRIP ---------- */
+  .tw-strip{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+  .tw-card{border-radius:20px;overflow:hidden;border:1px solid rgba(255,255,255,.08);
+    background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,.01));
+    display:flex;flex-direction:column;transition:transform .5s var(--ease),border-color .5s;min-height:230px}
+  .tw-card:hover{transform:translateY(-6px);border-color:rgba(255,178,62,.35)}
+  .tw-card img{width:100%;height:150px;object-fit:cover;display:block}
+  .tw-thumb{height:150px;display:grid;place-items:center;font-size:2rem;
+    background:linear-gradient(135deg,rgba(139,107,255,.3),rgba(255,107,138,.2))}
+  .tw-body{padding:16px 18px;display:flex;flex-direction:column;gap:6px;flex:1}
+  .tw-src{font-size:.64rem;letter-spacing:.16em;text-transform:uppercase;color:var(--gold);font-weight:700}
+  .tw-body p{font-size:.9rem;line-height:1.5;color:var(--cream)}
+  .tw-body time{font-size:.74rem;color:var(--text-dim);margin-top:auto}
+
+  /* ---------- VALUES MARQUEE ---------- */
+  .marquee{padding:50px 0;border-top:1px solid rgba(255,255,255,.08);border-bottom:1px solid rgba(255,255,255,.08);overflow:hidden;white-space:nowrap}
+  .marquee-track{display:inline-flex;gap:40px;animation:scroll 28s linear infinite;font-family:'Fraunces',serif;font-size:clamp(1.8rem,4vw,3rem);font-style:italic}
+  .marquee-track span{color:var(--text-dim)}
+  .marquee-track b{color:var(--gold);font-weight:500;font-style:normal}
+  .star{color:var(--rose);font-style:normal}
+  @keyframes scroll{to{transform:translateX(-50%)}}
+
+  /* ---------- CONNECT GRID ---------- */
+  .bento{display:grid;grid-template-columns:repeat(4,1fr);grid-auto-rows:200px;gap:18px}
+  .cell{border-radius:22px;padding:28px;border:1px solid rgba(255,255,255,.08);position:relative;overflow:hidden;
+    background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,.01));display:flex;flex-direction:column;justify-content:space-between;transition:transform .5s var(--ease),border-color .5s}
+  .cell:hover{transform:translateY(-6px);border-color:rgba(255,178,62,.35)}
+  .cell h3{font-family:'Fraunces',serif;font-weight:500;font-size:1.4rem}
+  .cell p{color:var(--text-dim);font-size:.9rem;line-height:1.55;margin-top:6px}
+  .cell .ic{font-size:1.6rem}
+  .span2{grid-column:span 2}
+  .row2{grid-row:span 2}
+  .cell-feature{background:linear-gradient(150deg,rgba(255,138,61,.2),rgba(255,107,138,.12));border-color:rgba(255,178,62,.3)}
+
+  /* ---------- EVENTS ---------- */
+  .ev-list{display:flex;flex-direction:column;gap:14px}
+  .ev{display:flex;align-items:center;gap:22px;padding:20px 24px;border-radius:18px;text-decoration:none;
+    border:1px solid rgba(255,255,255,.09);background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,.02));
+    transition:transform .4s var(--ease),border-color .4s}
+  .ev:hover{transform:translateX(6px);border-color:rgba(255,178,62,.4)}
+  .ev-date{flex-shrink:0;width:66px;height:66px;border-radius:14px;display:grid;place-items:center;text-align:center;
+    background:linear-gradient(150deg,rgba(255,178,62,.2),rgba(139,107,255,.16));border:1px solid rgba(255,255,255,.1)}
+  .ev-mo{font-size:.64rem;letter-spacing:.12em;color:var(--gold);font-weight:700;line-height:1}
+  .ev-day{font-family:'Fraunces',serif;font-size:1.5rem;line-height:1.1}
+  .ev-body{flex:1;min-width:0}
+  .ev-cat{display:inline-block;font-size:.62rem;letter-spacing:.12em;text-transform:uppercase;font-weight:700;
+    padding:4px 10px;border-radius:100px;margin-bottom:7px}
+  .ev-cat-students{background:rgba(139,107,255,.2);color:#bda9ff}
+  .ev-cat-worship{background:rgba(255,178,62,.18);color:var(--gold)}
+  .ev-cat-family{background:rgba(255,107,138,.18);color:#ff9db1}
+  .ev-cat-global{background:rgba(94,200,255,.18);color:#9bdcff}
+  .ev-cat-kids{background:rgba(120,220,160,.18);color:#8fe3b4}
+  .ev-cat-serve{background:rgba(255,138,61,.18);color:#ffb07a}
+  .ev-body h3{font-family:'Fraunces',serif;font-weight:500;font-size:1.2rem;line-height:1.15}
+  .ev-body p{color:var(--text-dim);font-size:.88rem;margin-top:4px}
+  .ev-go{flex-shrink:0;font-size:.84rem;font-weight:600;color:var(--gold)}
+
+  /* ---------- ABOUT PASTOR ---------- */
+  .about-grid{display:grid;grid-template-columns:.8fr 1.2fr;gap:46px;align-items:start}
+  .about-photo{position:sticky;top:100px}
+  .about-img{border-radius:24px;aspect-ratio:4/5;display:grid;place-items:center;font-size:4rem;
+    background:linear-gradient(150deg,rgba(255,178,62,.22),rgba(139,107,255,.18));border:1px solid rgba(255,255,255,.1)}
+  .about-fam{text-align:center;margin-top:14px;color:var(--text-dim);font-size:.85rem;letter-spacing:.04em}
+  .about-lead{font-family:'Fraunces',serif;font-size:clamp(1.3rem,2.4vw,1.7rem);line-height:1.35;margin-bottom:22px}
+  .about-body p{color:var(--text-dim);font-size:1.02rem;line-height:1.75;margin-bottom:16px}
+  .about-quote{font-family:'Fraunces',serif;font-style:italic;font-size:1.3rem;line-height:1.45;color:var(--cream);
+    border-left:3px solid var(--gold);padding:6px 0 6px 22px;margin:26px 0}
+  .about-cta{display:flex;gap:12px;flex-wrap:wrap;margin-top:24px}
+
+  /* ---------- PASTOR'S CORNER ---------- */
+  .pc-grid{display:grid;grid-template-columns:1.4fr 1fr;gap:24px}
+  .pc-feature{border-radius:24px;overflow:hidden;text-decoration:none;display:flex;flex-direction:column;
+    border:1px solid rgba(255,255,255,.1);background:linear-gradient(165deg,rgba(255,178,62,.12),rgba(139,107,255,.08));
+    transition:transform .5s var(--ease),border-color .5s}
+  .pc-feature:hover{transform:translateY(-6px);border-color:rgba(255,178,62,.4)}
+  .pc-portrait{height:190px;display:grid;place-items:center;font-size:3.4rem;
+    background:linear-gradient(135deg,rgba(139,107,255,.3),rgba(255,107,138,.2))}
+  .pc-feat-body{padding:28px}
+  .pc-kind{font-size:.66rem;letter-spacing:.16em;text-transform:uppercase;color:var(--gold);font-weight:700}
+  .pc-feat-body h3{font-family:'Fraunces',serif;font-weight:500;font-size:1.7rem;line-height:1.12;margin:10px 0 12px}
+  .pc-feat-body p{color:var(--text-dim);font-size:.98rem;line-height:1.65}
+  .pc-meta{display:block;margin-top:16px;color:var(--text-dim);font-size:.82rem}
+  .pc-recent{border-radius:24px;padding:26px 28px;border:1px solid rgba(255,255,255,.09);background:rgba(255,255,255,.03)}
+  .pc-recent-h{font-family:'Fraunces',serif;font-weight:500;font-size:1.2rem;margin-bottom:8px}
+  .pc-item{display:block;padding:15px 0;border-bottom:1px solid rgba(255,255,255,.09);text-decoration:none;transition:padding-left .3s}
+  .pc-item:hover{padding-left:6px}
+  .pc-tag-b{font-size:.6rem;letter-spacing:.12em;text-transform:uppercase;color:var(--gold);font-weight:700}
+  .pc-item b{display:block;font-weight:600;font-size:1rem;margin:3px 0}
+  .pc-item i{font-style:normal;color:var(--text-dim);font-size:.8rem}
+  .pc-all{display:inline-block;margin-top:16px;color:var(--gold);font-weight:600;font-size:.88rem;text-decoration:none}
+  .pc-channels{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:24px}
+  .pc-chan{display:flex;align-items:center;gap:14px;padding:20px 22px;border-radius:18px;text-decoration:none;
+    border:1px solid rgba(255,255,255,.1);background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,.02));
+    transition:transform .4s var(--ease),border-color .4s}
+  .pc-chan:hover{transform:translateY(-5px);border-color:rgba(255,178,62,.4)}
+  .pc-chan-ic{font-size:1.7rem}
+  .pc-chan b{font-weight:600}
+  .pc-chan i{display:block;font-style:normal;color:var(--text-dim);font-size:.82rem;margin-top:2px}
+
+  /* ---------- PODCAST ---------- */
+  .pod-hero{display:flex;gap:30px;align-items:center;border-radius:26px;padding:32px;
+    background:linear-gradient(150deg,rgba(139,107,255,.18),rgba(255,178,62,.1));border:1px solid rgba(255,255,255,.1)}
+  .pod-art{flex-shrink:0;width:130px;height:130px;border-radius:22px;display:grid;place-items:center;font-size:3.4rem;
+    background:linear-gradient(135deg,#3a2a5e,#241c44);border:1px solid rgba(255,255,255,.12)}
+  .pod-hero-body h3{font-family:'Fraunces',serif;font-weight:500;font-size:1.6rem;line-height:1.12;margin:8px 0 10px}
+  .pod-hero-body p{color:var(--text-dim);font-size:.96rem;line-height:1.6}
+  .pod-controls{display:flex;align-items:center;gap:18px;margin-top:18px;flex-wrap:wrap}
+  .pod-play{background:linear-gradient(120deg,var(--gold),var(--gold-deep));color:var(--ink);border:none;
+    font-weight:700;font-size:.92rem;padding:12px 24px;border-radius:100px;cursor:pointer;font-family:inherit;
+    transition:transform .3s var(--ease)}
+  .pod-play:hover{transform:translateY(-2px)}
+  .pod-subs{display:flex;gap:8px;flex-wrap:wrap}
+  .pod-sub{font-size:.8rem;font-weight:600;padding:8px 15px;border-radius:100px;text-decoration:none;color:var(--cream);
+    border:1px solid rgba(255,255,255,.18);transition:background .3s}
+  .pod-sub:hover{background:rgba(255,255,255,.08)}
+  .pod-list{margin-top:18px;display:flex;flex-direction:column}
+  .pod-ep{display:flex;align-items:center;gap:18px;padding:16px 6px;border-bottom:1px solid rgba(255,255,255,.09);cursor:pointer;transition:padding-left .3s}
+  .pod-ep:hover{padding-left:14px}
+  .pod-num{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;flex-shrink:0;
+    background:rgba(255,178,62,.16);color:var(--gold);font-size:.7rem}
+  .pod-ep-body{flex:1}
+  .pod-ep-body b{font-weight:600}
+  .pod-ep-body i{display:block;font-style:normal;color:var(--text-dim);font-size:.82rem;margin-top:2px}
+  .pod-dur{color:var(--text-dim);font-size:.84rem;flex-shrink:0}
+
+  /* ---------- OUTREACH / PARTNERS ---------- */
+  .partners{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+  .partner{border-radius:22px;padding:28px;border:1px solid rgba(255,255,255,.09);text-decoration:none;
+    background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,.02));
+    display:flex;flex-direction:column;transition:transform .5s var(--ease),border-color .5s}
+  .partner:hover{transform:translateY(-7px);border-color:rgba(255,178,62,.4)}
+  .pt-tag{font-size:.66rem;letter-spacing:.16em;text-transform:uppercase;color:var(--gold);font-weight:700;margin-bottom:14px}
+  .partner h3{font-family:'Fraunces',serif;font-weight:500;font-size:1.3rem;margin-bottom:9px;line-height:1.15}
+  .partner p{color:var(--text-dim);font-size:.92rem;line-height:1.6;flex:1}
+  .partner .arrow{margin-top:16px;font-size:.84rem;font-weight:600;color:var(--gold);display:inline-flex;gap:7px;transition:gap .3s}
+  .partner:hover .arrow{gap:12px}
+  .serve-strip{margin-top:30px;border-radius:22px;padding:24px 28px;border:1px solid rgba(255,255,255,.1);
+    background:linear-gradient(120deg,rgba(255,178,62,.1),rgba(139,107,255,.08));
+    display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .serve-label{font-weight:600;font-size:.95rem}
+  .serve-pill{font-size:.84rem;padding:8px 15px;border-radius:100px;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.04)}
+  .serve-strip .btn{margin-left:auto}
+
+  /* ---------- STORIES ---------- */
+  .stories-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+  .story{border-radius:22px;padding:32px;border:1px solid rgba(255,255,255,.09);
+    background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,.02));margin:0;
+    display:flex;flex-direction:column;justify-content:space-between;transition:transform .5s var(--ease),border-color .5s}
+  .story:hover{transform:translateY(-6px);border-color:rgba(255,178,62,.35)}
+  .story blockquote{font-family:'Fraunces',serif;font-size:1.15rem;line-height:1.5;margin:0 0 22px}
+  .story figcaption b{font-weight:600}
+  .story figcaption span{display:block;color:var(--text-dim);font-size:.84rem;margin-top:3px}
+
+  /* ---------- PRAYER WALL ---------- */
+  .prayer-grid{display:grid;grid-template-columns:.95fr 1.05fr;gap:56px;align-items:start}
+  .prayer-stat{margin-top:30px;display:flex;align-items:baseline;gap:12px}
+  .prayer-stat b{font-family:'Fraunces',serif;font-size:2.6rem;color:var(--gold)}
+  .prayer-stat span{color:var(--text-dim);font-size:.95rem}
+  .prayer-panel{border-radius:24px;padding:30px;border:1px solid rgba(255,255,255,.1);
+    background:linear-gradient(160deg,rgba(255,178,62,.1),rgba(139,107,255,.08))}
+  .pr-label{display:block;font-size:.8rem;letter-spacing:.04em;color:var(--cream);margin-bottom:8px;font-weight:600}
+  .pr-label em{color:var(--text-dim);font-style:normal;font-weight:400}
+  textarea,.modal-input{width:100%;background:rgba(14,11,24,.5);border:1px solid rgba(255,255,255,.16);
+    border-radius:13px;padding:13px 15px;color:var(--cream);font-family:inherit;font-size:.95rem;resize:vertical}
+  textarea:focus,.modal-input:focus{outline:none;border-color:var(--gold)}
+  .pr-row{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-top:14px;flex-wrap:wrap}
+  .pr-check{font-size:.86rem;color:var(--text-dim);display:flex;align-items:center;gap:8px;cursor:pointer}
+  .pr-wall{margin-top:24px;display:flex;flex-direction:column;gap:10px;max-height:220px;overflow:auto}
+  .pr-item{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);border-radius:13px;
+    padding:13px 15px;font-size:.92rem;line-height:1.5;animation:slideIn .5s var(--ease)}
+  .pr-item span{color:var(--gold);font-size:.78rem}
+  @keyframes slideIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
+
+  /* ---------- MODAL ---------- */
+  .modal{position:fixed;inset:0;z-index:200;display:none;align-items:center;justify-content:center;padding:20px;
+    background:rgba(8,6,15,.72);backdrop-filter:blur(8px)}
+  .modal.open{display:flex;animation:fade .3s ease}
+  @keyframes fade{from{opacity:0}to{opacity:1}}
+  .modal-card{position:relative;width:100%;max-width:460px;border-radius:26px;padding:38px;
+    background:linear-gradient(165deg,#1c1636,#120d26);border:1px solid rgba(255,255,255,.12);
+    box-shadow:0 40px 100px rgba(0,0,0,.6);animation:pop .4s var(--ease)}
+  @keyframes pop{from{transform:translateY(20px) scale(.97);opacity:0}to{transform:none;opacity:1}}
+  .modal-x{position:absolute;top:16px;right:18px;background:none;border:none;color:var(--text-dim);font-size:1.7rem;cursor:pointer;line-height:1}
+  .modal-x:hover{color:var(--cream)}
+  .modal-h{font-family:'Fraunces',serif;font-weight:500;font-size:1.8rem;margin:12px 0 6px}
+  .modal-sub{color:var(--text-dim);font-size:.95rem;line-height:1.6;margin-bottom:22px}
+  .opt-row{display:flex;gap:9px;flex-wrap:wrap;margin-bottom:20px}
+  .opt{font-size:.86rem;padding:9px 15px;border-radius:100px;border:1px solid rgba(255,255,255,.16);
+    background:rgba(255,255,255,.04);cursor:pointer;display:flex;align-items:center;gap:7px}
+  .opt input{accent-color:var(--gold)}
+  .modal-input{margin-bottom:12px}
+
+  /* ---------- GIVE CTA ---------- */
+  .give{text-align:center;padding:150px 0}
+  .give h2{max-width:18ch;margin:0 auto}
+  .give .lead{margin:24px auto 0}
+
+  /* ---------- FOOTER ---------- */
+  footer{border-top:1px solid rgba(255,255,255,.08);padding:70px 0 40px}
+  .foot-grid{display:grid;grid-template-columns:1.5fr 1fr 1fr 1fr 1fr;gap:34px;margin-bottom:50px}
+  .foot-grid h4{font-size:.72rem;letter-spacing:.18em;text-transform:uppercase;color:var(--gold);margin-bottom:18px}
+  .foot-grid a{display:block;color:var(--text-dim);font-size:.92rem;margin-bottom:11px;transition:color .25s}
+  .foot-grid a:hover{color:var(--cream)}
+  .foot-about p{color:var(--text-dim);font-size:.92rem;line-height:1.7;margin-top:16px;max-width:34ch}
+  .foot-bottom{display:flex;justify-content:space-between;align-items:center;padding-top:28px;border-top:1px solid rgba(255,255,255,.08);color:var(--text-dim);font-size:.82rem;flex-wrap:wrap;gap:12px}
+
+  /* ---------- RESPONSIVE ---------- */
+  @media(max-width:900px){
+    .nav-links{display:none}
+    .paths{grid-template-columns:1fr}
+    .sunday-grid{grid-template-columns:1fr;gap:36px}
+    .bento{grid-template-columns:1fr 1fr;grid-auto-rows:170px}
+    .span2{grid-column:span 2}
+    .foot-grid{grid-template-columns:1fr 1fr}
+    .sec{padding:90px 0}
+    .msg-grid{grid-template-columns:1fr;gap:28px}
+    .song-list{grid-template-columns:1fr}
+    .tw-strip{grid-template-columns:1fr}
+    .st-grid{grid-template-columns:1fr}
+    .stories-grid{grid-template-columns:1fr}
+    .prayer-grid{grid-template-columns:1fr;gap:32px}
+    .st-cta{flex-direction:column;align-items:flex-start}
+    .partners{grid-template-columns:1fr}
+    .serve-strip .btn{margin-left:0}
+    .pc-grid{grid-template-columns:1fr}
+    .pc-channels{grid-template-columns:1fr}
+    .about-grid{grid-template-columns:1fr;gap:28px}
+    .about-photo{position:static}
+    .about-img{aspect-ratio:16/10}
+    .pod-hero{flex-direction:column;text-align:center}
+    .ev{gap:16px;padding:16px 18px}
+    .ev-go{display:none}
+    #believe .paths,#believe .paths:last-of-type{grid-template-columns:1fr !important}
+  }
+  @media(max-width:560px){
+    .bento{grid-template-columns:1fr}
+    .span2{grid-column:span 1}
+    .foot-grid{grid-template-columns:1fr}
+    .livebar{justify-content:center;text-align:center}
+  }
+</style>
+</head>
+<body>
+
+<nav id="nav">
+  <a class="logo" href="#top">
+    <span class="mark">E</span>
+    <div><b>East End</b><span>Assembly of God</span></div>
+  </a>
+  <div class="nav-links">
+    <a href="#new">I'm New</a>
+    <a href="#students">Students</a>
+    <a href="#events">Events</a>
+    <a href="#watch">Messages</a>
+    <a href="#pastor">Pastor's Corner</a>
+    <a href="#give">Give</a>
+  </div>
+  <a href="#" class="btn btn-glow" data-visit>Plan a Visit →</a>
+</nav>
+
+<!-- HERO -->
+<header class="hero" id="top">
+  <div class="rays"></div>
+  <div class="sun"></div>
+  <div class="grain"></div>
+  <div class="wrap hero-content">
+    <div class="eyebrow reveal in"><span class="pulse"></span> A diverse community church • Pittsburgh's East End</div>
+    <h1 class="hero-title reveal in d1">Restoring hope.<br /><em>Changing lives.</em></h1>
+    <p class="hero-sub reveal in d2">No matter where you've been or what you believe, there's a seat for you here. Come as you are — Sundays at 10:30am on S. Evaline Street, or live from anywhere.</p>
+    <div class="hero-cta reveal in d3">
+      <a href="#" class="btn btn-glow btn-lg" data-visit>Plan your first visit</a>
+      <a href="#watch" class="btn btn-ghost btn-lg"><span class="play">▶</span> Watch live</a>
+    </div>
+  </div>
+</header>
+
+<!-- LIVE BAR -->
+<div class="wrap">
+  <div class="livebar reveal">
+    <div class="lb-item">
+      <span class="lb-label">Next gathering</span>
+      <span class="lb-value">Sunday Worship</span>
+    </div>
+    <div class="lb-divider"></div>
+    <div class="lb-item">
+      <span class="lb-label">Starts in</span>
+      <span class="lb-value lb-count" id="countdown">—</span>
+    </div>
+    <div class="lb-divider"></div>
+    <div class="lb-item">
+      <span class="lb-label">Where</span>
+      <span class="lb-value">430 S Evaline St</span>
+    </div>
+    <a href="#watch" class="btn btn-glow">Set a reminder</a>
+  </div>
+</div>
+
+<!-- I'M NEW / PATHS -->
+<section class="sec" id="new">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="tag">Start here</span>
+      <h2>Walking in for the <em>first time?</em></h2>
+      <p class="lead">We get that a new church can feel like a lot. So we made it simple. Pick the path that fits you and we'll take it from there — no pressure, no obligation.</p>
+    </div>
+    <div class="paths">
+      <a class="path p1 reveal d1" href="#">
+        <div class="glow"></div>
+        <div class="num">01 / Visit</div>
+        <h3>What to expect</h3>
+        <p>Casual, come-as-you-are worship. About 70 minutes. Real people, great coffee, and care for your kids.</p>
+        <span class="arrow">Plan a visit →</span>
+      </a>
+      <a class="path p2 reveal d2" href="#">
+        <div class="glow"></div>
+        <div class="num">02 / Belong</div>
+        <h3>Find your people</h3>
+        <p>Home groups in Bloomfield & the South Hills, plus mid-week gatherings where faith gets personal.</p>
+        <span class="arrow">Join a group →</span>
+      </a>
+      <a class="path p3 reveal d3" href="#">
+        <div class="glow"></div>
+        <div class="num">03 / Grow</div>
+        <h3>Take a next step</h3>
+        <p>Baptism, serving on a team, or just someone to talk and pray with. We'll walk it with you.</p>
+        <span class="arrow">Talk to us →</span>
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- MARQUEE -->
+<div class="marquee">
+  <div class="marquee-track">
+    <span>Restoring hope</span><b class="star">✶</b><span>Changing lives</span><b class="star">✶</b><span>Everyone welcome</span><b class="star">✶</b><span>Following Jesus</span><b class="star">✶</b><span>Restoring hope</span><b class="star">✶</b><span>Changing lives</span><b class="star">✶</b><span>Everyone welcome</span><b class="star">✶</b><span>Following Jesus</span><b class="star">✶</b>
+  </div>
+</div>
+
+<!-- SUNDAY -->
+<section class="sec sunday" id="sunday">
+  <div class="wrap sunday-grid">
+    <div class="reveal">
+      <span class="tag">Gather with us</span>
+      <h2>One church, <em>all week long</em></h2>
+      <p class="lead">Sunday is the heartbeat, but the family keeps meeting through the week in living rooms across the city. Drop into whichever one is closest to home.</p>
+    </div>
+    <div class="time-card reveal d2">
+      <div class="big-time"><small>Sunday Worship</small>10:30<span style="font-size:1.8rem"> AM</span></div>
+      <div class="wk">
+        <div class="wk-row"><span>Wed · South Hills Home Group</span><span>7:00 PM</span></div>
+        <div class="wk-row"><span>Wed · Bloomfield Home Group</span><span>7:30 PM</span></div>
+        <div class="wk-row" style="border:none"><span>Kids & nursery</span><span>Every Sunday</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- STUDENTS & YOUNG ADULTS -->
+<section class="students" id="students">
+  <div class="st-glow"></div>
+  <div class="wrap" style="position:relative;z-index:2">
+    <div class="sec-head reveal">
+      <span class="tag">Students &amp; young adults</span>
+      <h2>New city. New people.<br /><em>A place to belong.</em></h2>
+      <p class="lead">Minutes from Pitt, CMU, Duquesne, Chatham, Carlow and Point Park. If you're far from home, figuring life out, or just want real community and a free home-cooked meal — pull up a chair. No church background needed.</p>
+    </div>
+
+    <div class="campus-chips reveal d1">
+      <span>Pitt</span><span>CMU</span><span>Duquesne</span><span>Chatham</span><span>Carlow</span><span>Point Park</span><span>+ everyone</span>
+    </div>
+
+    <div class="st-grid">
+      <div class="st-card st-feature reveal d1">
+        <div class="st-emoji">🍝</div>
+        <h3>Free Sunday lunch</h3>
+        <p>Every week after the 10:30 service. Real food, real people, zero cost. The fastest way to meet the crew — come hungry.</p>
+      </div>
+      <div class="st-card reveal d2">
+        <div class="st-emoji">🚐</div>
+        <h3>Rides from campus</h3>
+        <p>No car? No problem. Request a pickup from your dorm and ride with us Sunday morning.</p>
+      </div>
+      <div class="st-card reveal d3">
+        <div class="st-emoji">🌏</div>
+        <h3>International students</h3>
+        <p>Welcome dinners, holiday meals when campus empties out, airport pickups, and friends from day one.</p>
+      </div>
+      <div class="st-card reveal d2">
+        <div class="st-emoji">🔥</div>
+        <h3>Thursday night gathering</h3>
+        <p>Worship, a real talk, and hang time near campus. The midweek reset you didn't know you needed.</p>
+      </div>
+      <div class="st-card reveal d3">
+        <div class="st-emoji">☕</div>
+        <h3>Finals survival</h3>
+        <p>Free coffee, quiet study space, and care packages when finals week is trying to end you.</p>
+      </div>
+      <div class="st-card st-join reveal d4">
+        <div class="st-emoji">💬</div>
+        <h3>Join the group chat</h3>
+        <p>The fastest way in. Rides, events, free food alerts, and people who'll actually text back.</p>
+        <a href="#" class="btn btn-glow" style="margin-top:14px">Join the GroupMe →</a>
+      </div>
+    </div>
+
+    <div class="st-cta reveal">
+      <div>
+        <h3 class="st-cta-h">First Sunday away from home?</h3>
+        <p>Tell us you're coming and we'll save you a seat, a ride, and a plate.</p>
+      </div>
+      <a href="#" class="btn btn-glow btn-lg" data-visit>I'm a student — plan my visit</a>
+    </div>
+  </div>
+</section>
+
+<!-- EVENTS -->
+<section class="sec sunday" id="events">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="tag">What's coming up</span>
+      <h2>Events &amp; <em>gatherings</em></h2>
+      <p class="lead">There's always something happening at East End — worship nights, student meals, serve days, and family events. Come to one, bring a friend.</p>
+    </div>
+
+    <div class="ev-list">
+      <a class="ev reveal d1" href="#" data-visit>
+        <div class="ev-date"><span class="ev-mo">JUN</span><span class="ev-day">14</span></div>
+        <div class="ev-body">
+          <span class="ev-cat ev-cat-students">Students</span>
+          <h3>Free Sunday Lunch for Students</h3>
+          <p>After the 10:30 service · 430 S Evaline St · rides available from campus</p>
         </div>
-      </a>`).join("");
-  })
-  .catch(() => {});                              // keep fallback tiles
-```
+        <span class="ev-go">RSVP →</span>
+      </a>
+      <a class="ev reveal d1" href="#" data-visit>
+        <div class="ev-date"><span class="ev-mo">JUN</span><span class="ev-day">19</span></div>
+        <div class="ev-body">
+          <span class="ev-cat ev-cat-worship">Worship</span>
+          <h3>Night of Worship &amp; Prayer</h3>
+          <p>Thursday · 7:00 PM · an evening to slow down and seek God together</p>
+        </div>
+        <span class="ev-go">Details →</span>
+      </a>
+      <a class="ev reveal d2" href="#" data-visit>
+        <div class="ev-date"><span class="ev-mo">JUN</span><span class="ev-day">28</span></div>
+        <div class="ev-body">
+          <span class="ev-cat ev-cat-family">Family</span>
+          <h3>Baptism Sunday</h3>
+          <p>During the 10:30 service · taking your next step? Let us know</p>
+        </div>
+        <span class="ev-go">I'm interested →</span>
+      </a>
+      <a class="ev reveal d2" href="#" data-visit>
+        <div class="ev-date"><span class="ev-mo">JUL</span><span class="ev-day">07</span></div>
+        <div class="ev-body">
+          <span class="ev-cat ev-cat-global">International</span>
+          <h3>Around-the-World Dinner</h3>
+          <p>Monday · 6:00 PM · a shared meal celebrating our international students &amp; neighbors</p>
+        </div>
+        <span class="ev-go">RSVP →</span>
+      </a>
+      <a class="ev reveal d3" href="#" data-visit>
+        <div class="ev-date"><span class="ev-mo">JUL</span><span class="ev-day">14</span></div>
+        <div class="ev-body">
+          <span class="ev-cat ev-cat-kids">Kids</span>
+          <h3>Vacation Bible School Week</h3>
+          <p>Mon–Fri · 9 AM–12 PM · a week of fun, faith, and friends for kids K–5</p>
+        </div>
+        <span class="ev-go">Register →</span>
+      </a>
+      <a class="ev reveal d3" href="#" data-visit>
+        <div class="ev-date"><span class="ev-mo">JUL</span><span class="ev-day">26</span></div>
+        <div class="ev-body">
+          <span class="ev-cat ev-cat-serve">Serve</span>
+          <h3>East End Serve Day</h3>
+          <p>Saturday · 10 AM · serving the neighborhood with East End Cooperative Ministry</p>
+        </div>
+        <span class="ev-go">Sign up →</span>
+      </a>
+    </div>
+    <div style="text-align:center;margin-top:40px" class="reveal">
+      <a href="#" class="btn btn-glow btn-lg">View the full calendar</a>
+    </div>
+    <p class="sample-note" style="text-align:center">Sample events — connects to your Google Calendar or Church Center calendar.</p>
+  </div>
+</section>
 
-*(This hook is already wired into the prototype's "This Week at East End" section.)*
+<!-- MESSAGES -->
+<section class="sec" id="watch">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="tag">Latest message</span>
+      <h2>Catch the message, <em>live or on demand</em></h2>
+      <p class="lead">Travelling, home sick, or exploring from a distance? Join live Sundays at 10:30, or catch up any time on our message archive.</p>
+    </div>
 
----
+    <!-- LATEST MESSAGE: video + summary -->
+    <div class="msg-grid reveal d1">
+      <!-- ▼▼ LIVE DATA: replace the href/thumbnail with the newest video from youtube.com/@eastend4209.
+           To embed inline instead, swap this card for:
+           <iframe class="watch-card" src="https://www.youtube.com/embed/VIDEO_ID" allowfullscreen></iframe> ▼▼ -->
+      <a class="watch-card" href="https://www.youtube.com/@eastend4209" target="_blank" rel="noopener">
+        <div class="grain"></div>
+        <div class="pbtn">▶</div>
+        <div class="watch-meta">
+          <div class="live-dot"><i></i> Live Sundays 10:30 AM</div>
+        </div>
+      </a>
+      <div class="msg-detail">
+        <div class="msg-date">Most recent · East End Assembly of God</div>
+        <h3 class="msg-title">Encouragement for Spiritual Emphasis &amp; Fasting Week</h3>
+        <p class="msg-summary">
+          A call to lean in. This message frames fasting and prayer not as religious box-ticking but as
+          a way of making room — quieting the noise so we can hear God and lean on His grace rather than our own
+          strength. The encouragement is steady and hopeful: spiritual growth is God's work in us as we simply
+          keep showing up to Him.
+        </p>
+        <div class="scripture">
+          <span class="sc-label">Anchor passage</span>
+          <p>"But seek first the kingdom of God and his righteousness, and all these things will be added to you." — Matthew 6:33</p>
+        </div>
+        <!-- ▲ AUTO-DRAFTED from the video captions; a human gives it a 20-second read before it goes live. ▲ -->
+        <div class="msg-cta">
+          <a href="https://www.youtube.com/@eastend4209" target="_blank" rel="noopener" class="btn btn-glow">Watch full message</a>
+          <a href="https://www.youtube.com/@eastend4209/videos" target="_blank" rel="noopener" class="btn btn-ghost">All messages</a>
+        </div>
+      </div>
+    </div>
 
-## Things to know before you build
+    <!-- SONGS WE SANG -->
+    <div class="songs reveal d2">
+      <div class="songs-head">
+        <div>
+          <span class="tag" style="margin-bottom:8px">Sounds of a Sunday</span>
+          <h3 class="songs-title">Songs we sang this week</h3>
+          <p class="songs-note">A blend of the old and the new — hymns, organ, and contemporary worship. New here? Have a listen so it feels a little more like home before you ever walk in.</p>
+        </div>
+        <!-- ▼ LIVE DATA: link to a real Spotify/YouTube "East End Worship" playlist ▼ -->
+        <a href="#" class="btn btn-glow">▶ Open the playlist</a>
+      </div>
+      <div class="song-list">
+        <div class="song"><span class="s-num">01</span><div><b>Great Is Thy Faithfulness</b><i>Hymn</i></div></div>
+        <div class="song"><span class="s-num">02</span><div><b>What a Beautiful Name</b><i>Contemporary</i></div></div>
+        <div class="song"><span class="s-num">03</span><div><b>It Is Well With My Soul</b><i>Hymn</i></div></div>
+        <div class="song"><span class="s-num">04</span><div><b>Goodness of God</b><i>Contemporary</i></div></div>
+        <div class="song"><span class="s-num">05</span><div><b>Holy, Holy, Holy</b><i>Hymn · Organ</i></div></div>
+      </div>
+      <p class="sample-note">Sample set list shown — wired to update from your weekly playlist.</p>
+    </div>
+  </div>
+</section>
 
-- **Don't rely on the Events endpoint.** Meta has restricted/deprecated third-party access to Page `/events`. Pull **posts and photos** for the strip, and keep event dates managed manually on the site (or in your posts). If you need a real calendar, a dedicated tool (Church Center, Google Calendar embed) is more reliable than the Events API.
-- **App Review / Live mode.** While the app is in *development* mode you (as admin/developer) can read your own page immediately. To serve the feed to *all* public visitors, the app usually needs to be in **Live** mode, and `pages_read_engagement` + `instagram_basic` may require **App Review + Business Verification**. Budget a few days for that approval if you go fully public.
-- **Caching is not optional.** The 30-minute cache in the function keeps you under rate limits and makes the page fast. Posts don't change minute-to-minute, so this is invisible to visitors.
-- **Token hygiene.** If a token ever leaks, revoke it in Business Settings and regenerate. Prefer the System User token so it isn't tied to one person's Facebook login.
-- **Instagram is likely your richest feed** — it's visual and probably your most active channel, which makes it the strongest "we're alive this week" signal on the whole site.
+<!-- ABOUT PASTOR -->
+<section class="sec" id="about">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="tag">Meet our pastor</span>
+      <h2>Pastor <em>David York</em></h2>
+    </div>
+    <div class="about-grid">
+      <div class="about-photo reveal d1">
+        <div class="about-img">🙏</div>
+        <div class="about-fam">The York Family</div>
+      </div>
+      <div class="about-body reveal d2">
+        <p class="about-lead">For years, Pastor David has led East End Assembly of God with one conviction: that no one is beyond the reach of God's hope.</p>
+        <p>David grew up [hometown / background], and came to faith [his story — how he met Christ]. After [training / calling], he and his wife [name] planted their lives in Pittsburgh's East End, drawn to its diversity and its need for a church that truly welcomes everyone.</p>
+        <p>Today David and [wife's name] raise their [number] children here in the city they love, [a detail or two about family life]. When he isn't preparing a message or sitting across the table from a student or a newcomer, you'll find him [a hobby / passion].</p>
+        <p>His heart for the East End is simple: a church where the lonely find family, the doubting find room to ask questions, and the hurting find hope that holds.</p>
+        <blockquote class="about-quote">"Restoring hope and changing lives isn't a slogan to us — it's the whole reason we exist."</blockquote>
+        <div class="about-cta">
+          <a href="#new" class="btn btn-glow" data-visit>Come say hello this Sunday</a>
+          <a href="#pastor" class="btn btn-ghost">Read his writing</a>
+        </div>
+        <p class="sample-note">Placeholder bio — send me Pastor David's real story and family details (and a photo) and I'll drop them straight in.</p>
+      </div>
+    </div>
+  </div>
+</section>
 
----
+<!-- PASTOR'S CORNER -->
+<section class="sec" id="pastor">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="tag">Pastor's Corner</span>
+      <h2>From <em>Pastor David York</em></h2>
+      <p class="lead">Thoughts between Sundays — short reflections, longer write-ups, the podcast, and video. A place to keep growing all week.</p>
+    </div>
 
-## If you'd rather not touch code
+    <div class="pc-grid">
+      <!-- Featured post -->
+      <a class="pc-feature reveal d1" href="#">
+        <div class="pc-portrait">🕊️</div>
+        <div class="pc-feat-body">
+          <span class="pc-kind">Featured · Blog</span>
+          <h3>Hope That Holds When Life Doesn't</h3>
+          <p>We talk a lot about "restoring hope." But what is hope actually anchored to when the diagnosis comes, the job falls through, or the city feels lonely? A reflection on the kind of hope that doesn't depend on circumstances.</p>
+          <span class="pc-meta">June 2 · 4 min read</span>
+        </div>
+      </a>
 
-Hosted widgets do this with no server and no token management — **SociableKit**, **Curator.io**, **EmbedSocial**, or **Juicer** all turn a Facebook Page + Instagram into an embeddable feed for a small monthly fee. You paste one `<script>` tag. The trade-off is a recurring cost, less design control, and their branding — but zero maintenance. For a small church with no developer, this is often the pragmatic choice; the custom Graph API route above is the right call only if you want it to match the redesign pixel-for-pixel and avoid subscriptions.
+      <!-- Recent list -->
+      <div class="pc-recent reveal d2">
+        <h4 class="pc-recent-h">Recent write-ups</h4>
+        <a class="pc-item" href="#"><span class="pc-tag-b">Devotional</span><b>Three Habits of a Quiet Heart</b><i>May 26 · 3 min</i></a>
+        <a class="pc-item" href="#"><span class="pc-tag-b">Write-up</span><b>Why We're an Assemblies of God Church</b><i>May 18 · 6 min</i></a>
+        <a class="pc-item" href="#"><span class="pc-tag-b">Reflection</span><b>Welcoming the Stranger in the East End</b><i>May 11 · 5 min</i></a>
+        <a class="pc-item" href="#"><span class="pc-tag-b">Devotional</span><b>What Fasting Taught Me This Year</b><i>May 4 · 3 min</i></a>
+        <a class="pc-all" href="#">All posts →</a>
+      </div>
+    </div>
+
+    <!-- From the pulpit to your feed -->
+    <div class="pc-channels reveal">
+      <a class="pc-chan" href="#podcast"><span class="pc-chan-ic">🎙️</span><div><b>Listen to the podcast</b><i>New episodes weekly</i></div></a>
+      <a class="pc-chan" href="https://www.youtube.com/@eastend4209" target="_blank" rel="noopener"><span class="pc-chan-ic">▶️</span><div><b>Watch on YouTube</b><i>Full messages &amp; clips</i></div></a>
+      <a class="pc-chan" href="#" data-visit><span class="pc-chan-ic">✉️</span><div><b>Get it by email</b><i>Pastor's note in your inbox</i></div></a>
+    </div>
+  </div>
+</section>
+
+<!-- PODCAST -->
+<section class="sec sunday" id="podcast">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="tag">The Restoring Hope Podcast</span>
+      <h2>Take the message <em>with you</em></h2>
+      <p class="lead">Sermons, conversations, and encouragement for the commute, the gym, or the dishes. Subscribe wherever you listen.</p>
+    </div>
+
+    <div class="pod-hero reveal d1">
+      <div class="pod-art">🎧</div>
+      <div class="pod-hero-body">
+        <span class="pc-kind">Latest episode</span>
+        <h3>Seek First: Living Out Matthew 6:33</h3>
+        <p>Pastor David unpacks what it means to put God's kingdom first when everything else is shouting for your attention.</p>
+        <div class="pod-controls">
+          <button class="pod-play">▶ Play · 32 min</button>
+          <div class="pod-subs">
+            <a href="#" class="pod-sub">Apple</a>
+            <a href="#" class="pod-sub">Spotify</a>
+            <a href="https://www.youtube.com/@eastend4209" target="_blank" rel="noopener" class="pod-sub">YouTube</a>
+            <a href="#" class="pod-sub">RSS</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="pod-list reveal d2">
+      <div class="pod-ep"><span class="pod-num">▶</span><div class="pod-ep-body"><b>The Welcome of God</b><i>Hospitality as worship</i></div><span class="pod-dur">28 min</span></div>
+      <div class="pod-ep"><span class="pod-num">▶</span><div class="pod-ep-body"><b>Hope for the Far-From-Home</b><i>A word for students &amp; newcomers</i></div><span class="pod-dur">25 min</span></div>
+      <div class="pod-ep"><span class="pod-num">▶</span><div class="pod-ep-body"><b>Fasting &amp; the Quiet Heart</b><i>Spiritual emphasis week</i></div><span class="pod-dur">34 min</span></div>
+      <div class="pod-ep"><span class="pod-num">▶</span><div class="pod-ep-body"><b>One Church, All Week Long</b><i>Why community matters</i></div><span class="pod-dur">30 min</span></div>
+    </div>
+    <p class="sample-note">Sample episodes — wired to your podcast host (Spotify for Podcasters, Buzzsprout, or your YouTube audio).</p>
+  </div>
+</section>
+
+<!-- THIS WEEK (FB + IG feed) -->
+<section class="sec" id="thisweek" style="padding-top:0">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="tag">Right now</span>
+      <h2>This week at <em>East End</em></h2>
+      <p class="lead">The latest from our Facebook and Instagram — events, photos, and moments from the life of the church, newest first.</p>
+    </div>
+    <!-- Sample tiles below are replaced live by /api/social (see eastend-social-feed-setup.md). If the feed is down, these remain. -->
+    <div class="tw-strip reveal d1" id="twStrip">
+      <a class="tw-card" href="https://www.instagram.com/eastendag" target="_blank" rel="noopener">
+        <div class="tw-thumb">📸</div>
+        <div class="tw-body"><span class="tw-src">Instagram</span><p>Sunday worship was a full house — grateful for this family. #EastEndPgh</p><time>This Sunday</time></div>
+      </a>
+      <a class="tw-card" href="https://www.facebook.com/eastendag" target="_blank" rel="noopener">
+        <div class="tw-thumb">📅</div>
+        <div class="tw-body"><span class="tw-src">Facebook</span><p>Midweek home groups meet Wednesday — Bloomfield 7:30, South Hills 7:00. All welcome.</p><time>2 days ago</time></div>
+      </a>
+      <a class="tw-card" href="https://www.instagram.com/eastendag" target="_blank" rel="noopener">
+        <div class="tw-thumb">🙌</div>
+        <div class="tw-body"><span class="tw-src">Instagram</span><p>"Seek first the kingdom." A word from this week's message.</p><time>4 days ago</time></div>
+      </a>
+    </div>
+    <p class="sample-note">Sample posts shown — connects to your live Facebook + Instagram via the Graph API setup guide.</p>
+  </div>
+</section>
+
+<!-- CONNECT BENTO -->
+<section class="sec" id="connect">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="tag">Get involved</span>
+      <h2>Ways to <em>connect & serve</em></h2>
+    </div>
+    <div class="bento">
+      <div class="cell cell-feature span2 row2 reveal">
+        <div class="ic">🤝</div>
+        <div>
+          <h3>Serve the East End</h3>
+          <p>Hospitality, kids, worship, outreach across Bloomfield and beyond. Bring whatever you've got — there's a place for it.</p>
+          <span class="arrow" style="color:var(--gold);font-weight:600;font-size:.9rem">Find your team →</span>
+        </div>
+      </div>
+      <div class="cell reveal d1"><div class="ic">📖</div><div><h3>Grow</h3><p>Classes & studies</p></div></div>
+      <div class="cell reveal d2"><div class="ic">👶</div><div><h3>Kids</h3><p>Safe & fun, every week</p></div></div>
+      <div class="cell span2 reveal d2"><div class="ic">🏠</div><div><h3>Home Groups</h3><p>Real community mid-week in Bloomfield & the South Hills.</p></div></div>
+      <div class="cell reveal d3"><div class="ic">✉️</div><div><h3>Weekly Email</h3><p>Stay in the loop</p></div></div>
+      <div class="cell reveal d3"><div class="ic">🙏</div><div><h3>Prayer</h3><p>We'll pray with you</p></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- OUTREACH & PARTNERS -->
+<section class="sec" id="outreach">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="tag">Outreach &amp; partners</span>
+      <h2>Loving the East End, <em>together</em></h2>
+      <p class="lead">We're surrounded by students, scholars, and newcomers from every corner of the world. We don't do this alone — we link arms with people already doing beautiful work in our neighborhood.</p>
+    </div>
+
+    <div class="partners">
+      <a class="partner reveal d1" href="https://www.chialphapittsburgh.org/" target="_blank" rel="noopener">
+        <div class="pt-tag">Students · our AG family</div>
+        <h3>Chi Alpha Pittsburgh</h3>
+        <p>The Assemblies of God's own campus ministry — 300+ students at Pitt, with a heart for international students. Our most natural partner.</p>
+        <span class="arrow">Learn more →</span>
+      </a>
+      <a class="partner reveal d2" href="https://omapittsburgh.org/east-end-cooperative-ministry/" target="_blank" rel="noopener">
+        <div class="pt-tag">Neighborhood</div>
+        <h3>East End Cooperative Ministry</h3>
+        <p>Founded in 1970 by 18 East End churches. Food pantry, community kitchen, shelter, and youth programs right on our blocks.</p>
+        <span class="arrow">Learn more →</span>
+      </a>
+      <a class="partner reveal d3" href="https://prismpgh.org/" target="_blank" rel="noopener">
+        <div class="pt-tag">International students</div>
+        <h3>PRISM</h3>
+        <p>Serving international students &amp; scholars since 1980 — Sunday dinners, conversation partners, and friendship for those far from home.</p>
+        <span class="arrow">Learn more →</span>
+      </a>
+      <a class="partner reveal d1" href="https://www.helloneighbor.io/resettlement" target="_blank" rel="noopener">
+        <div class="pt-tag">Refugees</div>
+        <h3>Hello Neighbor</h3>
+        <p>Pairs newly arrived refugee families with local mentor families for their first months — a perfect fit for our home groups.</p>
+        <span class="arrow">Learn more →</span>
+      </a>
+      <a class="partner reveal d2" href="https://www.jfcspgh.org/services/refugee-immigrant-services/resettlement-services/" target="_blank" rel="noopener">
+        <div class="pt-tag">Resettlement</div>
+        <h3>JFCS Pittsburgh</h3>
+        <p>Refugee resettlement that welcomes volunteers and welcome-home kits — furniture, household setup, English help, and friendship.</p>
+        <span class="arrow">Learn more →</span>
+      </a>
+      <a class="partner reveal d3" href="https://www.americanimmigrationcouncil.org/story/bhutanese-immigrant-co-founds-community-association-in-pittsburgh-that-supports-all-newcomers/" target="_blank" rel="noopener">
+        <div class="pt-tag">Community</div>
+        <h3>Bhutanese Community Assoc.</h3>
+        <p>Connecting us to Pittsburgh's largest refugee community — and to newcomers from Myanmar, Africa, and the Middle East.</p>
+        <span class="arrow">Learn more →</span>
+      </a>
+    </div>
+
+    <div class="serve-strip reveal">
+      <span class="serve-label">Easy ways to jump in:</span>
+      <span class="serve-pill">🍽️ Host a student meal</span>
+      <span class="serve-pill">🚐 Drive a Sunday route</span>
+      <span class="serve-pill">🗣️ ESL conversation café</span>
+      <span class="serve-pill">📦 Welcome-home kits</span>
+      <span class="serve-pill">🏠 Mentor a new family</span>
+      <a href="#" class="btn btn-glow" data-visit>Get involved →</a>
+    </div>
+  </div>
+</section>
+
+<!-- STORIES -->
+<section class="sec" id="stories">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="tag">Real stories</span>
+      <h2>Hope, <em>changing lives</em></h2>
+      <p class="lead">The best thing about East End isn't the building or the music — it's what God is doing in ordinary people. A few of their stories.</p>
+    </div>
+    <div class="stories-grid">
+      <figure class="story reveal d1">
+        <blockquote>"I came for the free lunch as a freshman and stayed because, for the first time since moving to Pittsburgh, I felt like I had a family."</blockquote>
+        <figcaption><b>Maya</b><span>Pitt student</span></figcaption>
+      </figure>
+      <figure class="story reveal d2">
+        <blockquote>"I walked in not believing much of anything. Nobody pushed me. They just kept showing up for me until I couldn't deny something had changed."</blockquote>
+        <figcaption><b>Andre</b><span>East End neighbor</span></figcaption>
+      </figure>
+      <figure class="story reveal d3">
+        <blockquote>"Our kids actually ask to come on Sundays now. As a parent, that tells me everything."</blockquote>
+        <figcaption><b>The Okafor family</b><span>Bloomfield</span></figcaption>
+      </figure>
+    </div>
+    <p class="sample-note">Sample testimonies — swap in real video and photo stories from your congregation.</p>
+  </div>
+</section>
+
+<!-- PRAYER WALL -->
+<section class="sec sunday" id="prayer">
+  <div class="wrap prayer-grid">
+    <div class="reveal">
+      <span class="tag">However you're doing</span>
+      <h2>Let us <em>pray with you</em></h2>
+      <p class="lead">No need to sign in or leave your name. Share what's on your heart — our team prays over every single request. You're not alone in this.</p>
+      <div class="prayer-stat"><b id="prayerCount">128</b><span>prayers lifted this month</span></div>
+    </div>
+    <div class="prayer-panel reveal d2">
+      <form id="prayerForm">
+        <label class="pr-label">Your prayer request <em>(anonymous)</em></label>
+        <textarea id="prayerInput" rows="3" placeholder="Share whatever's on your mind…" required></textarea>
+        <div class="pr-row">
+          <label class="pr-check"><input type="checkbox" id="prayerPublic" checked /> Share on the wall (no name shown)</label>
+          <button type="submit" class="btn btn-glow">Send it up 🙏</button>
+        </div>
+      </form>
+      <div class="pr-wall" id="prayerWall">
+        <div class="pr-item">"Starting chemo next week — praying for peace." <span>· someone in our city</span></div>
+        <div class="pr-item">"New to Pittsburgh and lonely. Pray I find community." <span>· a student</span></div>
+        <div class="pr-item">"Thankful — got the job! God is good." <span>· answered 🙌</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- WHAT WE BELIEVE -->
+<section class="sec" id="believe">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="tag">What we believe</span>
+      <h2>An <em>Assemblies of God</em> church</h2>
+      <p class="lead">We hold to the historic Christian faith and to the Assemblies of God Statement of Fundamental Truths. At the center are four cardinal doctrines — the beliefs that shape how we worship, grow, and reach our neighbors.</p>
+    </div>
+
+    <div class="paths" style="margin-bottom:22px">
+      <div class="path p1 reveal d1">
+        <div class="glow"></div>
+        <div class="num">01 / Cardinal doctrine</div>
+        <h3>Salvation</h3>
+        <p>Salvation is received through repentance toward God and faith in Jesus Christ — a free gift of grace, not earned, offered to everyone.</p>
+      </div>
+      <div class="path p2 reveal d2">
+        <div class="glow"></div>
+        <div class="num">02 / Cardinal doctrine</div>
+        <h3>Baptism in the Holy Spirit</h3>
+        <p>A Spirit-empowered life for every believer, given to deepen worship, faith, and witness — following the pattern of the early church.</p>
+      </div>
+      <div class="path p3 reveal d3">
+        <div class="glow"></div>
+        <div class="num">03 / Cardinal doctrine</div>
+        <h3>Divine Healing</h3>
+        <p>We believe God still heals today. We pray for the sick and trust His power and compassion, while caring for one another through every season.</p>
+      </div>
+    </div>
+    <div class="paths" style="grid-template-columns:1fr 2fr">
+      <div class="path p1 reveal d1" style="--rose:var(--sky)">
+        <div class="glow" style="background:radial-gradient(120% 80% at 0% 0%,rgba(94,200,255,.28),transparent 60%)"></div>
+        <div class="num">04 / Cardinal doctrine</div>
+        <h3>The Second Coming</h3>
+        <p>The blessed hope: Jesus is coming again. That promise gives us courage, urgency, and joy today.</p>
+      </div>
+      <div class="path reveal d2" style="justify-content:flex-start">
+        <div class="num" style="margin-bottom:14px">The fuller picture · 16 Fundamental Truths</div>
+        <p style="color:var(--text-dim);font-size:.96rem;line-height:1.7">
+          We also affirm the Scriptures as the inspired, authoritative Word of God; one true God eternally existing as
+          Father, Son, and Holy Spirit; the deity, virgin birth, and resurrection of Jesus Christ; the reality of the Fall
+          and our need for grace; the ordinances of water baptism by immersion and Holy Communion; sanctification and a
+          Spirit-filled life; the Church and its mission to reach the world; and the final triumph of God.
+        </p>
+        <a href="https://ag.org/beliefs/our-core-doctrines" target="_blank" rel="noopener" class="arrow" style="margin-top:18px">Read the full Statement of Fundamental Truths →</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- GIVE -->
+<section class="give sunday" id="give">
+  <div class="wrap reveal">
+    <span class="tag">Generosity</span>
+    <h2>Your giving <em>changes lives</em> in our city</h2>
+    <p class="lead">Every gift fuels worship, outreach, and care for our neighbors here in the East End. Give securely in under a minute.</p>
+    <div class="hero-cta" style="margin-top:34px">
+      <a href="#" class="btn btn-glow btn-lg">Give online</a>
+      <a href="#" class="btn btn-ghost btn-lg">Ways to give</a>
+    </div>
+  </div>
+</section>
+
+<!-- PLAN A VISIT MODAL -->
+<div class="modal" id="visitModal" aria-hidden="true">
+  <div class="modal-card">
+    <button class="modal-x" id="modalClose" aria-label="Close">×</button>
+    <div id="visitStep">
+      <span class="tag">Plan your visit</span>
+      <h3 class="modal-h">We'll be looking for you</h3>
+      <p class="modal-sub">Three quick questions. No obligation, no spam — just a warm welcome waiting.</p>
+      <form id="visitForm">
+        <label class="pr-label">Which gathering?</label>
+        <div class="opt-row">
+          <label class="opt"><input type="radio" name="svc" checked /> Sunday 10:30 AM</label>
+          <label class="opt"><input type="radio" name="svc" /> A home group</label>
+          <label class="opt"><input type="radio" name="svc" /> Student night</label>
+        </div>
+        <label class="pr-label">Bringing kids?</label>
+        <div class="opt-row">
+          <label class="opt"><input type="radio" name="kids" checked /> Yes</label>
+          <label class="opt"><input type="radio" name="kids" /> No</label>
+        </div>
+        <label class="pr-label">First name &amp; email (so we can say hi)</label>
+        <input class="modal-input" type="text" placeholder="First name" required />
+        <input class="modal-input" type="email" placeholder="you@email.com" required />
+        <button type="submit" class="btn btn-glow btn-lg" style="width:100%;margin-top:10px">Save my seat →</button>
+      </form>
+    </div>
+    <div id="visitDone" style="display:none;text-align:center">
+      <div style="font-size:3rem">🎉</div>
+      <h3 class="modal-h">You're all set!</h3>
+      <p class="modal-sub">In the real site this sends a warm personal email from a real person — not an autoresponder. Can't wait to meet you at East End.</p>
+      <button class="btn btn-glow btn-lg" id="modalDone2">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- FOOTER -->
+<footer>
+  <div class="wrap">
+    <div class="foot-grid">
+      <div class="foot-about">
+        <a class="logo" href="#top"><span class="mark">E</span><div><b>East End</b><span>Assembly of God</span></div></a>
+        <p>A diverse community church in the heart of Pittsburgh's East End. Restoring hope, changing lives.</p>
+      </div>
+      <div>
+        <h4>Visit</h4>
+        <a href="#new">Plan a visit</a><a href="#sunday">Service times</a><a href="#events">Events</a><a href="#believe">What we believe</a>
+      </div>
+      <div>
+        <h4>Watch & Listen</h4>
+        <a href="#about">About Pastor David</a><a href="#pastor">Pastor's Corner</a><a href="#podcast">Podcast</a><a href="#watch">Messages</a>
+      </div>
+      <div>
+        <h4>Connect</h4>
+        <a href="#students">Students</a><a href="#outreach">Outreach & partners</a><a href="#prayer">Prayer request</a><a href="#give">Give</a>
+      </div>
+      <div>
+        <h4>Find us</h4>
+        <a href="#">430 S Evaline St<br/>Pittsburgh, PA 15224</a>
+        <a href="tel:4126873493">412.687.3493</a>
+        <a href="mailto:info@eastendag.org">info@eastendag.org</a>
+      </div>
+    </div>
+    <div class="foot-bottom">
+      <span>© 2026 East End Assembly of God</span>
+      <span>Sundays 10:30 AM · Everyone welcome</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+  // nav scroll state
+  const nav=document.getElementById('nav');
+  addEventListener('scroll',()=>nav.classList.toggle('scrolled',scrollY>40));
+
+  // reveal on scroll
+  const io=new IntersectionObserver((es)=>{
+    es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target)}})
+  },{threshold:.15});
+  document.querySelectorAll('.reveal:not(.in)').forEach(el=>io.observe(el));
+
+  // countdown to next Sunday 10:30 AM
+  function nextService(){
+    const now=new Date();
+    const t=new Date(now);
+    t.setHours(10,30,0,0);
+    let add=(7-now.getDay())%7; // days until Sunday(0)
+    if(now.getDay()===0 && now<t) add=0;
+    else if(now.getDay()===0) add=7;
+    t.setDate(now.getDate()+add);
+    const d=t-now;
+    const days=Math.floor(d/864e5),h=Math.floor(d%864e5/36e5),m=Math.floor(d%36e5/6e4);
+    document.getElementById('countdown').textContent=
+      days>0?`${days}d ${h}h ${m}m`:`${h}h ${m}m`;
+  }
+  nextService();setInterval(nextService,60000);
+
+  // This Week strip — pulls live FB + IG posts from your own /api/social proxy.
+  // Falls back to the sample tiles already in the HTML if the endpoint isn't live.
+  // Server function + token setup: see eastend-social-feed-setup.md
+  (function(){
+    const strip=document.getElementById('twStrip');
+    if(!strip) return;
+    fetch('/api/social').then(r=>r.json()).then(({items})=>{
+      if(!items||!items.length) return; // keep fallback tiles
+      strip.innerHTML=items.map(it=>`
+        <a class="tw-card" href="${it.url}" target="_blank" rel="noopener">
+          ${it.image?`<img src="${it.image}" alt="">`:`<div class="tw-thumb">✶</div>`}
+          <div class="tw-body">
+            <span class="tw-src">${it.source}</span>
+            <p>${(it.text||'').slice(0,120)}</p>
+            <time>${new Date(it.time).toLocaleDateString()}</time>
+          </div>
+        </a>`).join('');
+    }).catch(()=>{}); // keep fallback tiles
+  })();
+
+  // Prayer wall (demo — in-memory; the real site posts to your team + database)
+  (function(){
+    const form=document.getElementById('prayerForm');
+    if(!form) return;
+    const input=document.getElementById('prayerInput');
+    const wall=document.getElementById('prayerWall');
+    const pub=document.getElementById('prayerPublic');
+    const count=document.getElementById('prayerCount');
+    form.addEventListener('submit',e=>{
+      e.preventDefault();
+      const txt=input.value.trim();
+      if(!txt) return;
+      count.textContent=parseInt(count.textContent,10)+1;
+      if(pub.checked){
+        const el=document.createElement('div');
+        el.className='pr-item';
+        el.innerHTML='"'+txt.replace(/</g,'&lt;')+'" <span>· just now</span>';
+        wall.prepend(el);
+      }
+      input.value='';
+      const btn=form.querySelector('button');
+      const orig=btn.textContent; btn.textContent='Praying for you 🙏';
+      setTimeout(()=>btn.textContent=orig,2200);
+    });
+  })();
+
+  // Podcast play buttons (demo — wire to your real audio host)
+  (function(){
+    const play=document.querySelector('.pod-play');
+    if(play){
+      let on=false;
+      play.addEventListener('click',()=>{on=!on;play.textContent=on?'❚❚ Playing… · 32 min':'▶ Play · 32 min';});
+    }
+    document.querySelectorAll('.pod-ep').forEach(ep=>{
+      ep.addEventListener('click',()=>{
+        const n=ep.querySelector('.pod-num');
+        const playing=n.textContent==='❚❚';
+        document.querySelectorAll('.pod-num').forEach(x=>x.textContent='▶');
+        n.textContent=playing?'▶':'❚❚';
+      });
+    });
+  })();
+
+  // Plan-a-Visit modal
+  (function(){
+    const modal=document.getElementById('visitModal');
+    if(!modal) return;
+    const step=document.getElementById('visitStep');
+    const done=document.getElementById('visitDone');
+    const open=()=>{modal.classList.add('open');modal.setAttribute('aria-hidden','false');step.style.display='';done.style.display='none';};
+    const close=()=>{modal.classList.remove('open');modal.setAttribute('aria-hidden','true');};
+    document.querySelectorAll('[data-visit]').forEach(b=>b.addEventListener('click',e=>{e.preventDefault();open();}));
+    document.getElementById('modalClose').addEventListener('click',close);
+    document.getElementById('modalDone2').addEventListener('click',close);
+    modal.addEventListener('click',e=>{if(e.target===modal)close();});
+    addEventListener('keydown',e=>{if(e.key==='Escape')close();});
+    document.getElementById('visitForm').addEventListener('submit',e=>{
+      e.preventDefault();step.style.display='none';done.style.display='block';
+    });
+  })();
+</script>
+</body>
+</html>
