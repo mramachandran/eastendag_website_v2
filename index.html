@@ -282,6 +282,30 @@
   .row2{grid-row:span 2}
   .cell-feature{background:linear-gradient(150deg,rgba(255,138,61,.2),rgba(255,107,138,.12));border-color:rgba(255,178,62,.3)}
 
+  /* ---------- WELCOME / MULTILINGUAL ---------- */
+  .lang-globe{font-size:1.2rem;text-decoration:none;margin-right:4px;opacity:.8;transition:opacity .3s,transform .3s}
+  .lang-globe:hover{opacity:1;transform:scale(1.12)}
+  .welcome-greet span{color:var(--gold);font-style:normal;-webkit-text-fill-color:var(--gold);margin:0 4px}
+  .lang-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:24px}
+  .lang-tab{font-family:inherit;font-size:.9rem;font-weight:600;padding:10px 20px;border-radius:100px;cursor:pointer;
+    background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.16);color:var(--text-dim);transition:all .3s var(--ease)}
+  .lang-tab:hover{color:var(--cream)}
+  .lang-tab.active{background:linear-gradient(120deg,var(--gold),var(--gold-deep));color:var(--ink);border-color:transparent}
+  .lang-panel{border-radius:24px;padding:38px;border:1px solid rgba(255,255,255,.1);
+    background:linear-gradient(155deg,rgba(94,200,255,.1),rgba(139,107,255,.08),rgba(255,178,62,.08))}
+  .lang-block{display:none}
+  .lang-block.active{display:block;animation:fade .4s ease}
+  .lang-welcome{font-family:'Fraunces',serif;font-size:clamp(1.3rem,2.4vw,1.7rem);line-height:1.4;margin-bottom:24px}
+  .lang-facts{list-style:none;display:grid;grid-template-columns:1fr 1fr;gap:12px 24px;margin-bottom:24px}
+  .lang-facts li{position:relative;padding-left:26px;color:var(--cream);font-size:.98rem;line-height:1.4}
+  .lang-facts li::before{content:"✦";position:absolute;left:0;color:var(--gold)}
+  .lang-note{color:var(--text-dim);font-size:.98rem;line-height:1.6;margin-bottom:12px}
+  .lang-note b{color:var(--cream)}
+  .lang-cta{display:flex;gap:12px;flex-wrap:wrap;margin-top:22px}
+  .welcome-partners{margin-top:26px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .wp-label{font-weight:600;font-size:.92rem;margin-right:4px}
+  .wp-pill{font-size:.82rem;padding:8px 15px;border-radius:100px;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.04);color:var(--text-dim)}
+
   /* ---------- EVENTS ---------- */
   .ev-list{display:flex;flex-direction:column;gap:14px}
   .ev{display:flex;align-items:center;gap:22px;padding:20px 24px;border-radius:18px;text-decoration:none;
@@ -474,6 +498,8 @@
     .serve-strip .btn{margin-left:0}
     .pc-grid{grid-template-columns:1fr}
     .pc-channels{grid-template-columns:1fr}
+    .lang-facts{grid-template-columns:1fr}
+    .lang-panel{padding:26px}
     .about-grid{grid-template-columns:1fr;gap:28px}
     .about-photo{position:static}
     .about-img{aspect-ratio:16/10}
@@ -502,9 +528,10 @@
     <a href="#students">Students</a>
     <a href="#events">Events</a>
     <a href="#watch">Messages</a>
-    <a href="#pastor">Pastor's Corner</a>
+    <a href="#welcome">Welcome</a>
     <a href="#give">Give</a>
   </div>
+  <a href="#welcome" class="lang-globe" title="Español · 中文 · नेपाली">🌐</a>
   <a href="#" class="btn btn-glow" data-visit>Plan a Visit →</a>
 </nav>
 
@@ -660,6 +687,89 @@
       </div>
       <a href="#" class="btn btn-glow btn-lg" data-visit>I'm a student — plan my visit</a>
     </div>
+  </div>
+</section>
+
+<!-- WELCOME / INTERNATIONAL (multilingual) -->
+<section class="sec" id="welcome">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="tag">You belong here</span>
+      <h2 class="welcome-greet">Welcome <span>·</span> Bienvenidos <span>·</span> 欢迎 <span>·</span> स्वागत छ</h2>
+      <p class="lead">However you got to Pittsburgh — for school, for work, for refuge, or a fresh start — there's a seat for you here. No church background, special clothes, or perfect English required.</p>
+    </div>
+
+    <div class="lang-tabs reveal d1">
+      <button class="lang-tab active" data-lang="en">English</button>
+      <button class="lang-tab" data-lang="es">Español</button>
+      <button class="lang-tab" data-lang="zh">中文</button>
+      <button class="lang-tab" data-lang="ne">नेपाली</button>
+    </div>
+
+    <div class="lang-panel reveal d1">
+      <!-- ENGLISH -->
+      <div class="lang-block active" data-lang="en">
+        <p class="lang-welcome">Come as you are. Whether you're a student far from home, a family putting down roots, or a newcomer to this country — you are welcome at East End, exactly as you are.</p>
+        <ul class="lang-facts">
+          <li>Sundays 10:30 AM · 430 S Evaline St</li>
+          <li>Free lunch after the service</li>
+          <li>Rides available from campus</li>
+          <li>Everyone welcome — every background, every status</li>
+        </ul>
+        <p class="lang-note"><b>International students:</b> our friends at Chi Alpha (Pitt) will make sure you're never alone here.</p>
+        <p class="lang-note"><b>New to the country?</b> We'll help you find furniture, English practice, and friends — alongside our resettlement partners.</p>
+        <div class="lang-cta"><a href="#" class="btn btn-glow" data-visit>Plan a visit</a><a href="#" class="btn btn-ghost" data-visit>Talk to someone</a></div>
+      </div>
+      <!-- ESPAÑOL -->
+      <div class="lang-block" data-lang="es">
+        <p class="lang-welcome">Ven tal como eres. Seas un estudiante lejos de casa, una familia echando raíces, o alguien recién llegado a este país — eres bienvenido en East End, exactamente como eres.</p>
+        <ul class="lang-facts">
+          <li>Domingos 10:30 AM · 430 S Evaline St</li>
+          <li>Almuerzo gratis después del servicio</li>
+          <li>Transporte disponible desde el campus</li>
+          <li>Todos son bienvenidos — sin importar su origen o situación</li>
+        </ul>
+        <p class="lang-note"><b>Estudiantes internacionales:</b> nuestros amigos de Chi Alpha (Pitt) se asegurarán de que nunca estés solo aquí.</p>
+        <p class="lang-note"><b>¿Recién llegado al país?</b> Te ayudaremos a encontrar muebles, práctica de inglés y amigos, junto con nuestros aliados.</p>
+        <div class="lang-cta"><a href="#" class="btn btn-glow" data-visit>Planea tu visita</a><a href="#" class="btn btn-ghost" data-visit>Habla con alguien</a></div>
+      </div>
+      <!-- 中文 -->
+      <div class="lang-block" data-lang="zh">
+        <p class="lang-welcome">以最真实的自己来到这里。无论你是远离家乡的学生、正在扎根的家庭，还是刚到这个国家的新朋友——East End 都欢迎你，欢迎真实的你。</p>
+        <ul class="lang-facts">
+          <li>主日上午 10:30 · 430 S Evaline St</li>
+          <li>礼拜后免费午餐</li>
+          <li>提供校园接送</li>
+          <li>欢迎每一个人——无论背景或身份</li>
+        </ul>
+        <p class="lang-note"><b>国际学生：</b>我们在匹兹堡大学 Chi Alpha 的朋友会确保你在这里不再孤单。</p>
+        <p class="lang-note"><b>刚到这个国家？</b>我们和我们的伙伴会帮助你找到家具、练习英语、结交朋友。</p>
+        <div class="lang-cta"><a href="#" class="btn btn-glow" data-visit>计划来访</a><a href="#" class="btn btn-ghost" data-visit>与我们联系</a></div>
+      </div>
+      <!-- नेपाली -->
+      <div class="lang-block" data-lang="ne">
+        <p class="lang-welcome">जस्तो हुनुहुन्छ त्यस्तै आउनुहोस्। तपाईं घरबाट टाढा रहेको विद्यार्थी हुनुहोस्, जरा गाड्दै गरेको परिवार होस्, वा यो देशमा भर्खरै आउनुभएको होस् — East End मा तपाईंलाई स्वागत छ, जस्तो हुनुहुन्छ त्यस्तै।</p>
+        <ul class="lang-facts">
+          <li>आइतबार बिहान १०:३० · 430 S Evaline St</li>
+          <li>सेवापछि निःशुल्क खाना</li>
+          <li>क्याम्पसबाट यातायात उपलब्ध</li>
+          <li>सबैलाई स्वागत छ — जुनसुकै पृष्ठभूमि वा अवस्था</li>
+        </ul>
+        <p class="lang-note"><b>अन्तर्राष्ट्रिय विद्यार्थीहरू:</b> पिट्सबर्गको Chi Alpha का हाम्रा साथीहरूले तपाईं यहाँ कहिल्यै एक्लो नहुने सुनिश्चित गर्नेछन्।</p>
+        <p class="lang-note"><b>देशमा नयाँ हुनुहुन्छ?</b> हामी र हाम्रा साझेदारहरूले तपाईंलाई फर्निचर, अंग्रेजी अभ्यास, र साथीहरू भेट्टाउन मद्दत गर्नेछौं।</p>
+        <div class="lang-cta"><a href="#" class="btn btn-glow" data-visit>भ्रमणको योजना बनाउनुहोस्</a><a href="#" class="btn btn-ghost" data-visit>कसैसँग कुरा गर्नुहोस्</a></div>
+      </div>
+    </div>
+
+    <div class="welcome-partners reveal d2">
+      <span class="wp-label">Here to help you land — together with:</span>
+      <span class="wp-pill">Chi Alpha (Pitt)</span>
+      <span class="wp-pill">PRISM Int'l Students</span>
+      <span class="wp-pill">Hello Neighbor</span>
+      <span class="wp-pill">JFCS Resettlement</span>
+      <span class="wp-pill">Bhutanese Community Assoc.</span>
+    </div>
+    <p class="sample-note">Translations are a starting draft — please have a native speaker review each before launch.</p>
   </div>
 </section>
 
@@ -1187,7 +1297,7 @@
       </div>
       <div>
         <h4>Connect</h4>
-        <a href="#students">Students</a><a href="#outreach">Outreach & partners</a><a href="#prayer">Prayer request</a><a href="#give">Give</a>
+        <a href="#welcome">Welcome (multilingual)</a><a href="#students">Students</a><a href="#outreach">Outreach & partners</a><a href="#prayer">Prayer request</a>
       </div>
       <div>
         <h4>Find us</h4>
@@ -1273,6 +1383,20 @@
       const btn=form.querySelector('button');
       const orig=btn.textContent; btn.textContent='Praying for you 🙏';
       setTimeout(()=>btn.textContent=orig,2200);
+    });
+  })();
+
+  // Multilingual welcome — switch language blocks
+  (function(){
+    const tabs=document.querySelectorAll('.lang-tab');
+    if(!tabs.length) return;
+    tabs.forEach(tab=>{
+      tab.addEventListener('click',()=>{
+        const lang=tab.dataset.lang;
+        tabs.forEach(t=>t.classList.toggle('active',t===tab));
+        document.querySelectorAll('.lang-block').forEach(b=>
+          b.classList.toggle('active',b.dataset.lang===lang));
+      });
     });
   })();
 
